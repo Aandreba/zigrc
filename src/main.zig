@@ -1,31 +1,44 @@
 const std = @import("std");
 
-/// This structure is not thread-safe.
+/// A single threaded, strong reference to a reference-counted value.
 pub fn Rc(comptime T: type) type {
     return struct {
-        value: *const T,
+        value: *T,
         alloc: std.mem.Allocator,
 
         const Self = @This();
         const Inner = RcInner(T);
 
-        pub fn init(alloc: std.mem.Allocator, t: T) Self {
-            const inner = alloc.create(Inner);
+        /// Creates a new reference-counted value.
+        pub fn init(alloc: std.mem.Allocator, t: T) !Self {
+            const inner = try alloc.create(Inner);
             inner.* = Inner{ .strong = 1, .weak = 1, .value = t };
+            return Self{ .value = &inner.value, .alloc = alloc };
         }
 
-        /// Increments the reference count
-        pub fn retain(self: *const Self) void {
+        /// Gets the number of strong references to this value.
+        pub fn strongCount(self: *const Self) usize {
+            return self.innerPtr().strong;
+        }
+
+        /// Gets the number of weak references to this value.
+        pub fn weakCount(self: *const Self) usize {
+            return self.innerPtr().weak - 1;
+        }
+
+        /// Increments the strong count
+        pub fn retain(self: *const Self) Self {
             self.innerPtr().strong += 1;
+            return self.*;
         }
 
         /// Creates a new weak reference to the pointed value
         pub fn downgrade(self: *const Self) Weak(T) {
-            _ = self;
+            return Weak(T).init(self);
         }
 
         /// Decrements the reference count, deallocating if the weak count reaches zero.
-        pub fn deinit(self: *const Self) void {
+        pub fn release(self: *const Self) void {
             const ptr = self.innerPtr();
 
             ptr.strong -= 1;
@@ -59,38 +72,56 @@ pub fn Rc(comptime T: type) type {
     };
 }
 
-/// This structure is not thread-safe.
+/// A single threaded, weak reference to a reference-counted value.
 pub fn Weak(comptime T: type) type {
     return struct {
-        inner: ?*align(@alignOf(Inner)) anyopaque,
+        inner: ?*align(@alignOf(Inner)) anyopaque = null,
         alloc: std.mem.Allocator,
 
-        pub const SelfRc = Rc(T);
         const Self = @This();
         const Inner = RcInner(T);
 
-        pub fn init(parent: *const SelfRc) Self {
+        /// Creates a new weak reference
+        pub fn init(parent: *const Rc(T)) Self {
             const ptr = parent.innerPtr();
             ptr.weak += 1;
             return Self{ .inner = ptr, .alloc = parent.alloc };
         }
 
-        pub fn upgrade(self: Self) ?SelfRc {
+        /// Gets the number of strong references to this value.
+        pub fn strongCount(self: *const Self) usize {
+            return (self.innerPtr() orelse return 0).strong;
+        }
+
+        /// Gets the number of weak references to this value.
+        pub fn weakCount(self: *const Self) usize {
+            return (self.innerPtr() orelse return 0).weak - 1;
+        }
+
+        /// Attempts to upgrade the weak pointer to an `Rc`, delaying dropping of the inner value if successful.
+        ///
+        /// Returns `null` if the inner value has since been dropped.
+        pub fn upgrade(self: Self) ?Rc(T) {
             const ptr = self.innerPtr() orelse return null;
 
             if (ptr.strong == 0) {
-                self.deinit();
+                ptr.weak -= 1;
+                if (ptr.weak == 0) {
+                    self.alloc.destroy(*ptr);
+                    ptr = null;
+                }
                 return null;
             }
 
             ptr.strong += 1;
-            return SelfRc{
+            return Rc(T){
                 .value = ptr.value,
                 .alloc = self.alloc,
             };
         }
 
-        pub fn deinit(self: *const Self) void {
+        /// Decrements the weak reference count, deallocating if it reaches zero.
+        pub fn release(self: *const Self) void {
             if (self.innerPtr()) |*ptr| {
                 ptr.weak -= 1;
                 if (ptr.weak == 0) {
