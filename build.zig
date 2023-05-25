@@ -7,6 +7,7 @@ pub fn build(b: *std.build.Builder) void {
     const mode = b.standardReleaseOptions();
 
     const lib = b.addStaticLibrary("zig-rc", "src/main.zig");
+    lib.emit_docs = .emit;
     lib.setBuildMode(mode);
     pkgs.addAllTo(lib);
     lib.install();
