@@ -45,12 +45,12 @@ jobs:
           # A directory to store and save the cache
           path: zig-cache
           # An explicit key for restoring and saving the cache
-          key: zigcache
+          key: job
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v1
         with:
           # Upload entire repository
-          path: 'docs'
+          path: "docs"
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v2
