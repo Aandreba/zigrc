@@ -19,11 +19,12 @@ const Data = struct {
 };
 
 test "example" {
+    std.debug.print("\n", .{});
     std.debug.print("Data size: {}\n", .{@sizeOf(Data)});
-    std.debug.print("Heap size: {}\n", .{Arc.innerSize()});
+    std.debug.print("Heap size: {}\n\n", .{Arc.innerSize()});
 
     std.debug.print("Data align: {}\n", .{@alignOf(Data)});
-    std.debug.print("Heap align: {}\n", .{Arc.innerAlign()});
+    std.debug.print("Heap align: {}\n\n", .{Arc.innerAlign()});
 
     var value = try Arc.init(std.testing.allocator, .{});
     errdefer value.releaseWithFn(Data.deinit);
@@ -41,14 +42,16 @@ test "example" {
         handle.join();
     }
 
-    const owned_value = value.tryUnwrap().?;
-    _ = owned_value;
+    const owned_value: Data = value.tryUnwrap().?;
+    defer owned_value.deinit();
+
+    std.debug.print("{d}\n", .{owned_value.data.items});
 }
 
 fn thread_exec(data: Arc) !void {
     defer data.releaseWithFn(Data.deinit);
 
-    var rng = std.rand.DefaultPrng.init(@bitCast(u64, std.time.milliTimestamp()));
+    var rng = std.rand.DefaultPrng.init(@bitCast(u64, @truncate(i64, std.time.nanoTimestamp())));
 
     data.value.mutex.lock();
     defer data.value.mutex.unlock();
@@ -56,5 +59,5 @@ fn thread_exec(data: Arc) !void {
     const value = rng.random().int(u64);
     try data.value.data.append(value);
 
-    std.debug.print("{}: {}\n", .{ try std.time.Instant.now(), value });
+    std.debug.print("{}: {}\n", .{ std.time.nanoTimestamp(), value });
 }
