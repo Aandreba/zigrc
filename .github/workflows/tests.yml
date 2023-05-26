@@ -13,5 +13,6 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: goto-bus-stop/setup-zig@v2
-      - name: Execute tests
-        run: zig build test
+        with:
+          version: 0.10.1
+      - run: zig build test
