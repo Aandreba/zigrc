@@ -1,5 +1,5 @@
-![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Aandreba/zig-rc/tests.yml)
-[![Docs](https://img.shields.io/badge/docs-zig-blue)](https://aandreba.github.io/zig-rc/)
+![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Aandreba/rzig/tests.yml)
+[![Docs](https://img.shields.io/badge/docs-zig-blue)](https://aandreba.github.io/rzig/)
 
 # rzig
 
