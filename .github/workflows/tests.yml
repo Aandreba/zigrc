@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - name: Install zig
-        run: snap install zig -classic
+        run: snap install zig --classic
       - name: Cache snap
         uses: actions/cache@v1.2.1
         with:
