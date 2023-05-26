@@ -89,9 +89,9 @@ test "cyclic" {
 }
 
 // MULTI THREADED
-test "basic atomics" {
+test "basic atomic" {
     var five = try rc.Arc(i32).init(alloc, 5);
-    defer five.release();
+    errdefer five.release();
 
     five.value.* += 1;
     try expect(five.value.* == 6);
@@ -106,4 +106,68 @@ test "basic atomics" {
 
     try expect(five.strongCount() == 1);
     try expect(five.weakCount() == 0);
+
+    try expect(five.tryUnwrap() != null);
+}
+
+test "weak atomic" {
+    var five = try rc.Arc(i32).init(alloc, 5);
+    try expect(five.strongCount() == 1);
+    try expect(five.weakCount() == 0);
+
+    // Creates weak reference
+    var weak_five = five.downgrade();
+    defer weak_five.release();
+    try expect(weak_five.strongCount() == 1);
+    try expect(weak_five.weakCount() == 1);
+
+    // First upgrade - strong ref still exists
+    const first_upgrade = weak_five.upgrade().?;
+    try expect(first_upgrade.strongCount() == 2);
+    try expect(first_upgrade.weakCount() == 1);
+
+    // Release upgrade
+    first_upgrade.release();
+    try expect(first_upgrade.strongCount() == 1);
+    try expect(first_upgrade.weakCount() == 1);
+
+    // Release strong ref
+    five.release();
+    try expect(weak_five.strongCount() == 0);
+    try expect(weak_five.weakCount() == 1);
+
+    // Second upgrade - strong ref no longer exists
+    try expect(weak_five.upgrade() == null);
+}
+
+test "cyclic atomic" {
+    const Gadget = struct {
+        _me: Weak,
+
+        const Self = @This();
+        const Rc = rc.Arc(Self);
+        const Weak = rc.Aweak(Self);
+
+        pub fn init(allocator: std.mem.Allocator) !Rc {
+            return Rc.initCyclic(allocator, Self.data_fn);
+        }
+
+        pub fn me(self: *Self) Rc {
+            return self._me.upgrade().?;
+        }
+
+        pub fn deinit(self: Self) void {
+            self._me.release();
+        }
+
+        fn data_fn(m: *Weak) Self {
+            return Self{ ._me = m.retain() };
+        }
+    };
+
+    var gadget = try Gadget.init(alloc);
+    defer gadget.releaseWithFn(Gadget.deinit);
+
+    try expect(gadget.strongCount() == 1);
+    try expect(gadget.weakCount() == 1);
 }
