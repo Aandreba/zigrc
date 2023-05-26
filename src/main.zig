@@ -138,7 +138,12 @@ pub fn Weak(comptime T: type) type {
 
         /// Gets the number of weak references to this value.
         pub fn weakCount(self: *const Self) usize {
-            return (self.innerPtr() orelse return 0).weak - 1;
+            const ptr = self.innerPtr() orelse return 1;
+            if (ptr.strong == 0) {
+                return ptr.weak;
+            } else {
+                return ptr.weak - 1;
+            }
         }
 
         /// Increments the weak count
@@ -158,15 +163,15 @@ pub fn Weak(comptime T: type) type {
             if (ptr.strong == 0) {
                 ptr.weak -= 1;
                 if (ptr.weak == 0) {
-                    self.alloc.destroy(*ptr);
-                    ptr = null;
+                    self.alloc.destroy(ptr);
+                    self.inner = null;
                 }
                 return null;
             }
 
             ptr.strong += 1;
             return Rc(T){
-                .value = ptr.value,
+                .value = &ptr.value,
                 .alloc = self.alloc,
             };
         }
@@ -310,8 +315,14 @@ pub fn Aweak(comptime T: type) type {
 
         /// Gets the number of weak references to this value.
         pub fn weakCount(self: *const Self) usize {
-            const ptr = self.innerPtr() orelse return 0;
-            return @atomicLoad(usize, &ptr.weak, .Acquire) - 1;
+            const ptr = self.innerPtr() orelse return 1;
+            const weak = @atomicLoad(usize, &ptr.weak, .Acquire);
+
+            if (@atomicLoad(usize, &ptr.strong, .Acquire) == 0) {
+                return weak;
+            } else {
+                return weak - 1;
+            }
         }
 
         /// Increments the weak count
@@ -368,8 +379,22 @@ pub fn Aweak(comptime T: type) type {
 
 fn RcInner(comptime T: type) type {
     return struct {
-        strong: usize,
-        weak: usize,
+        strong: usize align(std.atomic.cache_line),
+        weak: usize align(std.atomic.cache_line),
         value: T,
     };
+}
+
+/// Total size (in bytes) of the reference counted value on the heap.
+/// This value accounts for the extra memory required to count the references,
+/// and is valid for single and multi-threaded refrence counters.
+pub fn innerSize(comptime T: type) comptime_int {
+    return @sizeOf(RcInner(T));
+}
+
+/// Alignment (in bytes) of the reference counted value on the heap.
+/// This value accounts for the extra memory required to count the references,
+/// and is valid for single and multi-threaded refrence counters.
+pub fn innerAlign(comptime T: type) comptime_int {
+    return @alignOf(RcInner(T));
 }

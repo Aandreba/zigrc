@@ -2,52 +2,56 @@ const std = @import("std");
 const rc = @import("main.zig");
 const expect = std.testing.expect;
 
-threadlocal var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+const alloc = std.testing.allocator;
 
+// SINGLE THREAD
 test "basic" {
-    {
-        var five = try rc.Rc(i32).init(gpa.allocator(), 5);
-        defer five.release();
+    var five = try rc.Rc(i32).init(alloc, 5);
+    defer five.release();
 
-        five.value.* += 1;
-        try expect(five.value.* == 6);
+    five.value.* += 1;
+    try expect(five.value.* == 6);
 
-        try expect(five.strongCount() == 1);
-        try expect(five.weakCount() == 0);
+    try expect(five.strongCount() == 1);
+    try expect(five.weakCount() == 0);
 
-        var next_five = five.retain();
-        try expect(next_five.strongCount() == 2);
-        try expect(five.weakCount() == 0);
-        next_five.release();
+    var next_five = five.retain();
+    try expect(next_five.strongCount() == 2);
+    try expect(five.weakCount() == 0);
+    next_five.release();
 
-        try expect(five.strongCount() == 1);
-        try expect(five.weakCount() == 0);
-    }
-
-    _ = gpa.detectLeaks();
+    try expect(five.strongCount() == 1);
+    try expect(five.weakCount() == 0);
 }
 
-test "basic atomics" {
-    {
-        var five = try rc.Arc(i32).init(gpa.allocator(), 5);
-        defer five.release();
+test "weak" {
+    var five = try rc.Rc(i32).init(alloc, 5);
+    try expect(five.strongCount() == 1);
+    try expect(five.weakCount() == 0);
 
-        five.value.* += 1;
-        try expect(five.value.* == 6);
+    // Creates weak reference
+    var weak_five = five.downgrade();
+    defer weak_five.release();
+    try expect(weak_five.strongCount() == 1);
+    try expect(weak_five.weakCount() == 1);
 
-        try expect(five.strongCount() == 1);
-        try expect(five.weakCount() == 0);
+    // First upgrade - strong ref still exists
+    const first_upgrade = weak_five.upgrade().?;
+    try expect(first_upgrade.strongCount() == 2);
+    try expect(first_upgrade.weakCount() == 1);
 
-        var next_five = five.retain();
-        try expect(next_five.strongCount() == 2);
-        try expect(five.weakCount() == 0);
-        next_five.release();
+    // Release upgrade
+    first_upgrade.release();
+    try expect(first_upgrade.strongCount() == 1);
+    try expect(first_upgrade.weakCount() == 1);
 
-        try expect(five.strongCount() == 1);
-        try expect(five.weakCount() == 0);
-    }
+    // Release strong ref
+    five.release();
+    try expect(weak_five.strongCount() == 0);
+    try expect(weak_five.weakCount() == 1);
 
-    try expect(!gpa.detectLeaks());
+    // Second upgrade - strong ref no longer exists
+    try expect(weak_five.upgrade() == null);
 }
 
 test "cyclic" {
@@ -58,8 +62,8 @@ test "cyclic" {
         const Rc = rc.Rc(Self);
         const Weak = rc.Weak(Self);
 
-        pub fn init(alloc: std.mem.Allocator) !Rc {
-            return Rc.initCyclic(alloc, Self.data_fn);
+        pub fn init(allocator: std.mem.Allocator) !Rc {
+            return Rc.initCyclic(allocator, Self.data_fn);
         }
 
         pub fn me(self: *Self) Rc {
@@ -75,13 +79,29 @@ test "cyclic" {
         }
     };
 
-    {
-        var gadget = try Gadget.init(gpa.allocator());
-        defer gadget.releaseWithFn(Gadget.deinit);
+    var gadget = try Gadget.init(alloc);
+    defer gadget.releaseWithFn(Gadget.deinit);
 
-        try expect(gadget.strongCount() == 1);
-        try expect(gadget.weakCount() == 1);
-    }
+    try expect(gadget.strongCount() == 1);
+    try expect(gadget.weakCount() == 1);
+}
 
-    // try expect(!gpa.detectLeaks());
+// MULTI THREADED
+test "basic atomics" {
+    var five = try rc.Arc(i32).init(alloc, 5);
+    defer five.release();
+
+    five.value.* += 1;
+    try expect(five.value.* == 6);
+
+    try expect(five.strongCount() == 1);
+    try expect(five.weakCount() == 0);
+
+    var next_five = five.retain();
+    try expect(next_five.strongCount() == 2);
+    try expect(five.weakCount() == 0);
+    next_five.release();
+
+    try expect(five.strongCount() == 1);
+    try expect(five.weakCount() == 0);
 }
