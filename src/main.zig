@@ -8,7 +8,19 @@ pub fn Rc(comptime T: type) type {
         alloc: std.mem.Allocator,
 
         const Self = @This();
-        const Inner = RcInner(T);
+        const Inner = struct {
+            strong: usize,
+            weak: usize,
+            value: T,
+
+            fn innerSize() comptime_int {
+                return @sizeOf(@This());
+            }
+
+            fn innerAlign() comptime_int {
+                return @alignOf(@This());
+            }
+        };
 
         /// Creates a new reference-counted value.
         pub fn init(alloc: std.mem.Allocator, t: T) std.mem.Allocator.Error!Self {
@@ -19,13 +31,13 @@ pub fn Rc(comptime T: type) type {
 
         /// Constructs a new `Rc` while giving you a `Weak` to the allocation,
         /// to allow you to construct a `T` which holds a weak pointer to itself.
-        pub fn initCyclic(alloc: std.mem.Allocator, comptime data_fn: fn (*Weak(T)) T) std.mem.Allocator.Error!Self {
+        pub fn initCyclic(alloc: std.mem.Allocator, comptime data_fn: fn (*Weak) T) std.mem.Allocator.Error!Self {
             const inner = try alloc.create(Inner);
             inner.* = Inner{ .strong = 0, .weak = 1, .value = undefined };
 
             // Strong references should collectively own a shared weak reference,
             // so don't run the destructor for our old weak reference.
-            var weak = Weak(T){ .inner = inner, .alloc = alloc };
+            var weak = Weak{ .inner = inner, .alloc = alloc };
 
             // It's important we don't give up ownership of the weak pointer, or
             // else the memory might be freed by the time `data_fn` returns. If
@@ -58,8 +70,8 @@ pub fn Rc(comptime T: type) type {
         }
 
         /// Creates a new weak reference to the pointed value
-        pub fn downgrade(self: *Self) Weak(T) {
-            return Weak(T).init(self);
+        pub fn downgrade(self: *Self) Weak {
+            return Weak.init(self);
         }
 
         /// Decrements the reference count, deallocating if the weak count reaches zero.
@@ -132,98 +144,93 @@ pub fn Rc(comptime T: type) type {
         inline fn innerPtr(self: *const Self) *Inner {
             return @fieldParentPtr(Inner, "value", self.value);
         }
-    };
-}
 
-/// A single threaded, weak reference to a reference-counted value.
-pub fn Weak(comptime T: type) type {
-    return struct {
-        inner: ?*align(@alignOf(Inner)) anyopaque = null,
-        alloc: std.mem.Allocator,
+        /// A single threaded, weak reference to a reference-counted value.
+        pub const Weak = struct {
+            inner: ?*align(@alignOf(Inner)) anyopaque = null,
+            alloc: std.mem.Allocator,
 
-        const Self = @This();
-        const Inner = RcInner(T);
-
-        /// Creates a new weak reference.
-        pub fn init(parent: *Rc(T)) Self {
-            const ptr = parent.innerPtr();
-            ptr.weak += 1;
-            return Self{ .inner = ptr, .alloc = parent.alloc };
-        }
-
-        /// Gets the number of strong references to this value.
-        pub fn strongCount(self: *const Self) usize {
-            return (self.innerPtr() orelse return 0).strong;
-        }
-
-        /// Gets the number of weak references to this value.
-        pub fn weakCount(self: *const Self) usize {
-            const ptr = self.innerPtr() orelse return 1;
-            if (ptr.strong == 0) {
-                return ptr.weak;
-            } else {
-                return ptr.weak - 1;
-            }
-        }
-
-        /// Increments the weak count.
-        pub fn retain(self: *Self) Self {
-            if (self.innerPtr()) |ptr| {
+            /// Creates a new weak reference.
+            pub fn init(parent: *Rc(T)) Weak {
+                const ptr = parent.innerPtr();
                 ptr.weak += 1;
-            }
-            return self.*;
-        }
-
-        /// Attempts to upgrade the weak pointer to an `Rc`, delaying dropping of the inner value if successful.
-        ///
-        /// Returns `null` if the inner value has since been dropped.
-        pub fn upgrade(self: *Self) ?Rc(T) {
-            const ptr = self.innerPtr() orelse return null;
-
-            if (ptr.strong == 0) {
-                ptr.weak -= 1;
-                if (ptr.weak == 0) {
-                    self.alloc.destroy(ptr);
-                    self.inner = null;
-                }
-                return null;
+                return Weak{ .inner = ptr, .alloc = parent.alloc };
             }
 
-            ptr.strong += 1;
-            return Rc(T){
-                .value = &ptr.value,
-                .alloc = self.alloc,
-            };
-        }
+            /// Gets the number of strong references to this value.
+            pub fn strongCount(self: *const Weak) usize {
+                return (self.innerPtr() orelse return 0).strong;
+            }
 
-        /// Decrements the weak reference count, deallocating if it reaches zero.
-        /// The continued use of the pointer after calling `release` is undefined behaviour.
-        pub fn release(self: Self) void {
-            if (self.innerPtr()) |ptr| {
-                ptr.weak -= 1;
-                if (ptr.weak == 0) {
-                    self.alloc.destroy(ptr);
+            /// Gets the number of weak references to this value.
+            pub fn weakCount(self: *const Weak) usize {
+                const ptr = self.innerPtr() orelse return 1;
+                if (ptr.strong == 0) {
+                    return ptr.weak;
+                } else {
+                    return ptr.weak - 1;
                 }
             }
-        }
 
-        /// Total size (in bytes) of the reference counted value on the heap.
-        /// This value accounts for the extra memory required to count the references,
-        /// and is valid for single and multi-threaded refrence counters.
-        pub fn innerSize() comptime_int {
-            return Inner.innerSize();
-        }
+            /// Increments the weak count.
+            pub fn retain(self: *Weak) Weak {
+                if (self.innerPtr()) |ptr| {
+                    ptr.weak += 1;
+                }
+                return self.*;
+            }
 
-        /// Alignment (in bytes) of the reference counted value on the heap.
-        /// This value accounts for the extra memory required to count the references,
-        /// and is valid for single and multi-threaded refrence counters.
-        pub fn innerAlign() comptime_int {
-            return Inner.innerAlign();
-        }
+            /// Attempts to upgrade the weak pointer to an `Rc`, delaying dropping of the inner value if successful.
+            ///
+            /// Returns `null` if the inner value has since been dropped.
+            pub fn upgrade(self: *Weak) ?Rc(T) {
+                const ptr = self.innerPtr() orelse return null;
 
-        inline fn innerPtr(self: *const Self) ?*Inner {
-            return @ptrCast(?*Inner, self.inner);
-        }
+                if (ptr.strong == 0) {
+                    ptr.weak -= 1;
+                    if (ptr.weak == 0) {
+                        self.alloc.destroy(ptr);
+                        self.inner = null;
+                    }
+                    return null;
+                }
+
+                ptr.strong += 1;
+                return Rc(T){
+                    .value = &ptr.value,
+                    .alloc = self.alloc,
+                };
+            }
+
+            /// Decrements the weak reference count, deallocating if it reaches zero.
+            /// The continued use of the pointer after calling `release` is undefined behaviour.
+            pub fn release(self: Weak) void {
+                if (self.innerPtr()) |ptr| {
+                    ptr.weak -= 1;
+                    if (ptr.weak == 0) {
+                        self.alloc.destroy(ptr);
+                    }
+                }
+            }
+
+            /// Total size (in bytes) of the reference counted value on the heap.
+            /// This value accounts for the extra memory required to count the references,
+            /// and is valid for single and multi-threaded refrence counters.
+            pub fn innerSize() comptime_int {
+                return Inner.innerSize();
+            }
+
+            /// Alignment (in bytes) of the reference counted value on the heap.
+            /// This value accounts for the extra memory required to count the references,
+            /// and is valid for single and multi-threaded refrence counters.
+            pub fn innerAlign() comptime_int {
+                return Inner.innerAlign();
+            }
+
+            inline fn innerPtr(self: *const Weak) ?*Inner {
+                return @ptrCast(?*Inner, self.inner);
+            }
+        };
     };
 }
 
@@ -238,7 +245,19 @@ pub fn Arc(comptime T: type) type {
         alloc: std.mem.Allocator,
 
         const Self = @This();
-        const Inner = ArcInner(T);
+        const Inner = struct {
+            strong: usize align(std.atomic.cache_line),
+            weak: usize align(std.atomic.cache_line),
+            value: T,
+
+            fn innerSize() comptime_int {
+                return @sizeOf(@This());
+            }
+
+            fn innerAlign() comptime_int {
+                return @alignOf(@This());
+            }
+        };
 
         /// Creates a new reference-counted value.
         pub fn init(alloc: std.mem.Allocator, t: T) std.mem.Allocator.Error!Self {
@@ -249,13 +268,13 @@ pub fn Arc(comptime T: type) type {
 
         /// Constructs a new `Arc` while giving you a `Aweak` to the allocation,
         /// to allow you to construct a `T` which holds a weak pointer to itself.
-        pub fn initCyclic(alloc: std.mem.Allocator, comptime data_fn: fn (*Aweak(T)) T) std.mem.Allocator.Error!Self {
+        pub fn initCyclic(alloc: std.mem.Allocator, comptime data_fn: fn (*Weak) T) std.mem.Allocator.Error!Self {
             const inner = try alloc.create(Inner);
             inner.* = Inner{ .strong = 0, .weak = 1, .value = undefined };
 
             // Strong references should collectively own a shared weak reference,
             // so don't run the destructor for our old weak reference.
-            var weak = Aweak(T){ .inner = inner, .alloc = alloc };
+            var weak = Weak{ .inner = inner, .alloc = alloc };
 
             // It's important we don't give up ownership of the weak pointer, or
             // else the memory might be freed by the time `data_fn` returns. If
@@ -286,8 +305,8 @@ pub fn Arc(comptime T: type) type {
         }
 
         /// Creates a new weak reference to the pointed value.
-        pub fn downgrade(self: *Self) Aweak(T) {
-            return Aweak(T).init(self);
+        pub fn downgrade(self: *Self) Weak {
+            return Weak.init(self);
         }
 
         /// Decrements the reference count, deallocating if the weak count reaches zero.
@@ -352,141 +371,100 @@ pub fn Arc(comptime T: type) type {
         inline fn innerPtr(self: *const Self) *Inner {
             return @fieldParentPtr(Inner, "value", self.value);
         }
-    };
-}
 
-/// A multi-threaded, weak reference to a reference-counted value.
-pub fn Aweak(comptime T: type) type {
-    if (builtin.single_threaded) {
-        return Weak(T);
-    }
+        /// A multi-threaded, weak reference to a reference-counted value.
+        pub const Weak = struct {
+            inner: ?*align(@alignOf(Inner)) anyopaque = null,
+            alloc: std.mem.Allocator,
 
-    return struct {
-        inner: ?*align(@alignOf(Inner)) anyopaque = null,
-        alloc: std.mem.Allocator,
-
-        const Self = @This();
-        const Inner = ArcInner(T);
-
-        /// Creates a new weak reference.
-        pub fn init(parent: *Arc(T)) Self {
-            const ptr = parent.innerPtr();
-            _ = @atomicRmw(usize, &ptr.weak, .Add, 1, .AcqRel);
-            return Self{ .inner = ptr, .alloc = parent.alloc };
-        }
-
-        /// Gets the number of strong references to this value.
-        pub fn strongCount(self: *const Self) usize {
-            const ptr = self.innerPtr() orelse return 0;
-            return @atomicLoad(usize, &ptr.strong, .Acquire);
-        }
-
-        /// Gets the number of weak references to this value.
-        pub fn weakCount(self: *const Self) usize {
-            const ptr = self.innerPtr() orelse return 1;
-            const weak = @atomicLoad(usize, &ptr.weak, .Acquire);
-
-            if (@atomicLoad(usize, &ptr.strong, .Acquire) == 0) {
-                return weak;
-            } else {
-                return weak - 1;
-            }
-        }
-
-        /// Increments the weak count.
-        pub fn retain(self: *Self) Self {
-            if (self.innerPtr()) |ptr| {
+            /// Creates a new weak reference.
+            pub fn init(parent: *Arc(T)) Weak {
+                const ptr = parent.innerPtr();
                 _ = @atomicRmw(usize, &ptr.weak, .Add, 1, .AcqRel);
+                return Weak{ .inner = ptr, .alloc = parent.alloc };
             }
-            return self.*;
-        }
 
-        /// Attempts to upgrade the weak pointer to an `Arc`, delaying dropping of the inner value if successful.
-        ///
-        /// Returns `null` if the inner value has since been dropped.
-        pub fn upgrade(self: *Self) ?Arc(T) {
-            const ptr = self.innerPtr() orelse return null;
+            /// Gets the number of strong references to this value.
+            pub fn strongCount(self: *const Weak) usize {
+                const ptr = self.innerPtr() orelse return 0;
+                return @atomicLoad(usize, &ptr.strong, .Acquire);
+            }
 
-            while (true) {
-                const prev = @atomicLoad(usize, &ptr.strong, .Acquire);
+            /// Gets the number of weak references to this value.
+            pub fn weakCount(self: *const Weak) usize {
+                const ptr = self.innerPtr() orelse return 1;
+                const weak = @atomicLoad(usize, &ptr.weak, .Acquire);
 
-                if (prev == 0) {
+                if (@atomicLoad(usize, &ptr.strong, .Acquire) == 0) {
+                    return weak;
+                } else {
+                    return weak - 1;
+                }
+            }
+
+            /// Increments the weak count.
+            pub fn retain(self: *Weak) Weak {
+                if (self.innerPtr()) |ptr| {
+                    _ = @atomicRmw(usize, &ptr.weak, .Add, 1, .AcqRel);
+                }
+                return self.*;
+            }
+
+            /// Attempts to upgrade the weak pointer to an `Arc`, delaying dropping of the inner value if successful.
+            ///
+            /// Returns `null` if the inner value has since been dropped.
+            pub fn upgrade(self: *Weak) ?Arc(T) {
+                const ptr = self.innerPtr() orelse return null;
+
+                while (true) {
+                    const prev = @atomicLoad(usize, &ptr.strong, .Acquire);
+
+                    if (prev == 0) {
+                        if (@atomicRmw(usize, &ptr.weak, .Sub, 1, .AcqRel) == 1) {
+                            self.alloc.destroy(ptr);
+                            self.inner = null;
+                        }
+                        return null;
+                    }
+
+                    if (@cmpxchgStrong(usize, &ptr.strong, prev, prev + 1, .Acquire, .Monotonic) == null) {
+                        return Arc(T){
+                            .value = &ptr.value,
+                            .alloc = self.alloc,
+                        };
+                    }
+
+                    std.atomic.spinLoopHint();
+                }
+            }
+
+            /// Decrements the weak reference count, deallocating if it reaches zero.
+            /// The continued use of the pointer after calling `release` is undefined behaviour.
+            pub fn release(self: Weak) void {
+                if (self.innerPtr()) |ptr| {
                     if (@atomicRmw(usize, &ptr.weak, .Sub, 1, .AcqRel) == 1) {
                         self.alloc.destroy(ptr);
-                        self.inner = null;
                     }
-                    return null;
-                }
-
-                if (@cmpxchgStrong(usize, &ptr.strong, prev, prev + 1, .Acquire, .Monotonic) == null) {
-                    return Arc(T){
-                        .value = &ptr.value,
-                        .alloc = self.alloc,
-                    };
-                }
-
-                std.atomic.spinLoopHint();
-            }
-        }
-
-        /// Decrements the weak reference count, deallocating if it reaches zero.
-        /// The continued use of the pointer after calling `release` is undefined behaviour.
-        pub fn release(self: Self) void {
-            if (self.innerPtr()) |ptr| {
-                if (@atomicRmw(usize, &ptr.weak, .Sub, 1, .AcqRel) == 1) {
-                    self.alloc.destroy(ptr);
                 }
             }
-        }
 
-        /// Total size (in bytes) of the reference counted value on the heap.
-        /// This value accounts for the extra memory required to count the references,
-        /// and is valid for single and multi-threaded refrence counters.
-        pub fn innerSize() comptime_int {
-            return Inner.innerSize();
-        }
+            /// Total size (in bytes) of the reference counted value on the heap.
+            /// This value accounts for the extra memory required to count the references,
+            /// and is valid for single and multi-threaded refrence counters.
+            pub fn innerSize() comptime_int {
+                return Inner.innerSize();
+            }
 
-        /// Alignment (in bytes) of the reference counted value on the heap.
-        /// This value accounts for the extra memory required to count the references,
-        /// and is valid for single and multi-threaded refrence counters.
-        pub fn innerAlign() comptime_int {
-            return Inner.innerAlign();
-        }
+            /// Alignment (in bytes) of the reference counted value on the heap.
+            /// This value accounts for the extra memory required to count the references,
+            /// and is valid for single and multi-threaded refrence counters.
+            pub fn innerAlign() comptime_int {
+                return Inner.innerAlign();
+            }
 
-        inline fn innerPtr(self: *const Self) ?*Inner {
-            return @ptrCast(?*Inner, self.inner);
-        }
-    };
-}
-
-fn RcInner(comptime T: type) type {
-    return struct {
-        strong: usize,
-        weak: usize,
-        value: T,
-
-        fn innerSize() comptime_int {
-            return @sizeOf(@This());
-        }
-
-        fn innerAlign() comptime_int {
-            return @alignOf(@This());
-        }
-    };
-}
-
-fn ArcInner(comptime T: type) type {
-    return struct {
-        strong: usize align(std.atomic.cache_line),
-        weak: usize align(std.atomic.cache_line),
-        value: T,
-
-        fn innerSize() comptime_int {
-            return @sizeOf(@This());
-        }
-
-        fn innerAlign() comptime_int {
-            return @alignOf(@This());
-        }
+            inline fn innerPtr(self: *const Weak) ?*Inner {
+                return @ptrCast(?*Inner, self.inner);
+            }
+        };
     };
 }

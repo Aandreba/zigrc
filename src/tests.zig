@@ -62,7 +62,7 @@ test "cyclic" {
 
         const Self = @This();
         const Rc = rc.Rc(Self);
-        const Weak = rc.Weak(Self);
+        const Weak = Rc.Weak;
 
         pub fn init(allocator: std.mem.Allocator) !Rc {
             return Rc.initCyclic(allocator, Self.data_fn);
@@ -146,7 +146,7 @@ test "cyclic atomic" {
 
         const Self = @This();
         const Rc = rc.Arc(Self);
-        const Weak = rc.Aweak(Self);
+        const Weak = Rc.Weak;
 
         pub fn init(allocator: std.mem.Allocator) !Rc {
             return Rc.initCyclic(allocator, Self.data_fn);
