@@ -1,6 +1,4 @@
 docs/
 zig-cache/
 zig-out/
-.gyro/
-deps.zig
-gyro.lock
+kcov-out

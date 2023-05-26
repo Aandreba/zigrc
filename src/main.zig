@@ -100,6 +100,34 @@ pub fn Rc(comptime T: type) type {
             }
         }
 
+        /// Returns the inner value, if the `Rc` has exactly one strong reference.
+        /// Otherwise, `null` is returned.
+        /// This will succeed even if there are outstanding weak references.
+        pub fn tryUnwrap(self: Self) ?T {
+            const ptr = self.innerPtr();
+
+            if (ptr.strong == 1) {
+                ptr.strong = 0;
+                return self.value.*;
+            }
+
+            return null;
+        }
+
+        /// Total size (in bytes) of the reference counted value on the heap.
+        /// This value accounts for the extra memory required to count the references,
+        /// and is valid for single and multi-threaded refrence counters.
+        pub fn innerSize() comptime_int {
+            return Inner.innerSize();
+        }
+
+        /// Alignment (in bytes) of the reference counted value on the heap.
+        /// This value accounts for the extra memory required to count the references,
+        /// and is valid for single and multi-threaded refrence counters.
+        pub fn innerAlign() comptime_int {
+            return Inner.innerAlign();
+        }
+
         inline fn innerPtr(self: *const Self) *Inner {
             return @fieldParentPtr(Inner, "value", self.value);
         }
@@ -188,6 +216,20 @@ pub fn Weak(comptime T: type) type {
             }
         }
 
+        /// Total size (in bytes) of the reference counted value on the heap.
+        /// This value accounts for the extra memory required to count the references,
+        /// and is valid for single and multi-threaded refrence counters.
+        pub fn innerSize() comptime_int {
+            return Inner.innerSize();
+        }
+
+        /// Alignment (in bytes) of the reference counted value on the heap.
+        /// This value accounts for the extra memory required to count the references,
+        /// and is valid for single and multi-threaded refrence counters.
+        pub fn innerAlign() comptime_int {
+            return Inner.innerAlign();
+        }
+
         inline fn innerPtr(self: *const Self) ?*Inner {
             return @ptrCast(?*Inner, self.inner);
         }
@@ -273,12 +315,47 @@ pub fn Arc(comptime T: type) type {
         pub fn releaseWithFn(self: Self, comptime f: fn (T) void) void {
             const ptr = self.innerPtr();
 
-            if (@atomicRmw(usize, ptr.strong, .Sub, 1, .AcqRel) == 1) {
+            if (@atomicRmw(usize, &ptr.strong, .Sub, 1, .AcqRel) == 1) {
                 f(self.value.*);
-                if (@atomicRmw(usize, ptr.weak, .Sub, 1, .AcqRel) == 1) {
+                if (@atomicRmw(usize, &ptr.weak, .Sub, 1, .AcqRel) == 1) {
                     self.alloc.destroy(ptr);
                 }
             }
+        }
+
+        /// Returns the inner value, if the `Arc` has exactly one strong reference.
+        /// Otherwise, `null` is returned.
+        /// This will succeed even if there are outstanding weak references.
+        pub fn tryUnwrap(self: Self) ?T {
+            const ptr = self.innerPtr() orelse return null;
+
+            if (@cmpxchgStrong(usize, &ptr.strong, 1, 0, .Relaxed, .Relaxed) == null) {
+                ptr.strong = 0;
+                const tmp = self.value.*;
+
+                if (@atomicRmw(usize, ptr.weak, .Sub, 1, .AcqRel) == 1) {
+                    self.alloc.destroy(ptr.*);
+                    ptr.* = null;
+                }
+
+                return tmp;
+            }
+
+            return null;
+        }
+
+        /// Total size (in bytes) of the reference counted value on the heap.
+        /// This value accounts for the extra memory required to count the references,
+        /// and is valid for single and multi-threaded refrence counters.
+        pub fn innerSize() comptime_int {
+            return Inner.innerSize();
+        }
+
+        /// Alignment (in bytes) of the reference counted value on the heap.
+        /// This value accounts for the extra memory required to count the references,
+        /// and is valid for single and multi-threaded refrence counters.
+        pub fn innerAlign() comptime_int {
+            return Inner.innerAlign();
         }
 
         inline fn innerPtr(self: *const Self) *Inner {
@@ -363,12 +440,26 @@ pub fn Aweak(comptime T: type) type {
 
         /// Decrements the weak reference count, deallocating if it reaches zero.
         pub fn release(self: *const Self) void {
-            if (self.innerPtr()) |*ptr| {
-                if (@atomicRmw(usize, ptr.*.weak, .Sub, 1, .AcqRel) == 1) {
-                    self.alloc.destroy(ptr.*);
-                    ptr.* = null;
+            if (self.innerPtr()) |ptr| {
+                if (@atomicRmw(usize, &ptr.weak, .Sub, 1, .AcqRel) == 1) {
+                    self.alloc.destroy(ptr);
+                    self.inner = null;
                 }
             }
+        }
+
+        /// Total size (in bytes) of the reference counted value on the heap.
+        /// This value accounts for the extra memory required to count the references,
+        /// and is valid for single and multi-threaded refrence counters.
+        pub fn innerSize() comptime_int {
+            return Inner.innerSize();
+        }
+
+        /// Alignment (in bytes) of the reference counted value on the heap.
+        /// This value accounts for the extra memory required to count the references,
+        /// and is valid for single and multi-threaded refrence counters.
+        pub fn innerAlign() comptime_int {
+            return Inner.innerAlign();
         }
 
         inline fn innerPtr(self: *const Self) ?*Inner {
@@ -382,19 +473,13 @@ fn RcInner(comptime T: type) type {
         strong: usize align(std.atomic.cache_line),
         weak: usize align(std.atomic.cache_line),
         value: T,
+
+        fn innerSize() comptime_int {
+            return @sizeOf(@This());
+        }
+
+        fn innerAlign() comptime_int {
+            return @alignOf(@This());
+        }
     };
-}
-
-/// Total size (in bytes) of the reference counted value on the heap.
-/// This value accounts for the extra memory required to count the references,
-/// and is valid for single and multi-threaded refrence counters.
-pub fn innerSize(comptime T: type) comptime_int {
-    return @sizeOf(RcInner(T));
-}
-
-/// Alignment (in bytes) of the reference counted value on the heap.
-/// This value accounts for the extra memory required to count the references,
-/// and is valid for single and multi-threaded refrence counters.
-pub fn innerAlign(comptime T: type) comptime_int {
-    return @alignOf(RcInner(T));
 }
