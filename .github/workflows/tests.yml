@@ -12,14 +12,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Install zig
-        run: snap install zig --classic
-      - name: Cache snap
-        uses: actions/cache@v1.2.1
-        with:
-          # A directory to store and save the cache
-          path: /snap
-          # An explicit key for restoring and saving the cache
-          key: Snap
       - name: Execute tests
         run: zig build test
