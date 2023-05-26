@@ -17,4 +17,4 @@ Reference-counted pointers for Zig inspired by Rust's [`Rc`](https://doc.rust-la
 `zig build example`
 
 **Generate coverage report (requires kcov)**
-`zig build test -Dtest-coverage`
+`zig build test -Dcoverage`

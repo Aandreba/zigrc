@@ -10,7 +10,7 @@ pub fn build(b: *std.build.Builder) void {
     // Standard release options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
-    const coverage = b.option(bool, "test-coverage", "Generate test coverage") orelse false;
+    const coverage = b.option(bool, "coverage", "Generate test coverage") orelse false;
 
     // Docs
     const linux_64 = build_target(b, mode, Arch.x86_64, Os.linux);
@@ -23,7 +23,7 @@ pub fn build(b: *std.build.Builder) void {
     if (coverage) {
         main_tests.setExecCmd(&[_]?[]const u8{
             "kcov",
-            //"--path-strip-level=3", // any kcov flags can be specified here
+            "--include-pattern=src/main.zig,src/tests.zig",
             "kcov-out",
             null, // to get zig to use the --test-cmd-bin flag
         });

@@ -108,7 +108,14 @@ pub fn Rc(comptime T: type) type {
 
             if (ptr.strong == 1) {
                 ptr.strong = 0;
-                return self.value.*;
+                const tmp = self.value.*;
+
+                ptr.weak -= 1;
+                if (ptr.weak == 0) {
+                    self.alloc.destroy(ptr);
+                }
+
+                return tmp;
             }
 
             return null;

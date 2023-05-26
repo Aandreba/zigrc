@@ -7,7 +7,7 @@ const alloc = std.testing.allocator;
 // SINGLE THREAD
 test "basic" {
     var five = try rc.Rc(i32).init(alloc, 5);
-    defer five.release();
+    errdefer five.release();
 
     five.value.* += 1;
     try expect(five.value.* == 6);
@@ -22,6 +22,8 @@ test "basic" {
 
     try expect(five.strongCount() == 1);
     try expect(five.weakCount() == 0);
+
+    try expect(five.tryUnwrap() != null);
 }
 
 test "weak" {
