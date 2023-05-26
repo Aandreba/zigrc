@@ -145,7 +145,7 @@ pub fn Weak(comptime T: type) type {
         const Inner = RcInner(T);
 
         /// Creates a new weak reference.
-        pub fn init(parent: *const Rc(T)) Self {
+        pub fn init(parent: *Rc(T)) Self {
             const ptr = parent.innerPtr();
             ptr.weak += 1;
             return Self{ .inner = ptr, .alloc = parent.alloc };
@@ -369,7 +369,7 @@ pub fn Aweak(comptime T: type) type {
         const Inner = ArcInner(T);
 
         /// Creates a new weak reference.
-        pub fn init(parent: *const Arc(T)) Self {
+        pub fn init(parent: *Arc(T)) Self {
             const ptr = parent.innerPtr();
             _ = @atomicRmw(usize, &ptr.weak, .Add, 1, .AcqRel);
             return Self{ .inner = ptr, .alloc = parent.alloc };
