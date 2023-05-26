@@ -1,19 +1,19 @@
 ![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Aandreba/rzig/tests.yml)
 [![Docs](https://img.shields.io/badge/docs-zig-blue)](https://aandreba.github.io/rzig/)
 
-# rzig
+# zigrc
 
 Reference-counted pointers for Zig inspired by Rust's [`Rc`](https://doc.rust-lang.org/stable/std/rc/struct.Rc.html) and [`Arc`](https://doc.rust-lang.org/stable/std/sync/struct.Arc.html)
 
 ## How to use
 
-To use `rzig`, import the `src/main.zig` file into your project, or [add it as a module](https://ziglearn.org/chapter-3/#modules) on your build file.
+To use `zigrc`, import the `src/main.zig` file into your project, or [add it as a module](https://ziglearn.org/chapter-3/#modules) on your build file.
 
 ## Example
 
 ```zig
 const std = @import("std");
-const rc = @import("rzig");
+const rc = @import("zigrc");
 
 const Thread = std.Thread;
 const Mutex = Thread.Mutex;
