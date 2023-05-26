@@ -37,13 +37,6 @@ jobs:
         uses: goto-bus-stop/setup-zig@v2
         with:
           version: 0.10.1
-      - name: Cache docs
-        uses: actions/cache@v1.2.1
-        with:
-          # A directory to store and save the cache
-          path: zig-cache
-          # An explicit key for restoring and saving the cache
-          key: job
       - name: Generate docs
         run: zig build
       - name: Upload artifact
