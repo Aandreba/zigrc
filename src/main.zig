@@ -43,7 +43,7 @@ pub fn Rc(comptime T: type) type {
 
         /// Converts an `Rc` into an `Arc`.
         pub fn intoAtomic(self: Self) Arc(T) {
-            if (builtin.single_thread) {
+            if (builtin.single_threaded) {
                 return self;
             } else {
                 return Arc(T){ .value = self.value, .alloc = self.alloc };
@@ -124,7 +124,7 @@ pub fn Weak(comptime T: type) type {
 
         /// Converts an `Weak` into an `Aweak`.
         pub fn intoAtomic(self: Self) Aweak(T) {
-            if (builtin.single_thread) {
+            if (builtin.single_threaded) {
                 return self;
             } else {
                 return Aweak(T){ .inner = self.inner, .alloc = self.alloc };
@@ -191,7 +191,7 @@ pub fn Weak(comptime T: type) type {
 
 /// A multi-threaded, strong reference to a reference-counted value.
 pub fn Arc(comptime T: type) type {
-    if (builtin.single_thread) {
+    if (builtin.single_threaded) {
         return Rc(T);
     }
 
@@ -256,8 +256,8 @@ pub fn Arc(comptime T: type) type {
         pub fn release(self: Self) void {
             const ptr = self.innerPtr();
 
-            if (@atomicRmw(usize, ptr.strong, .Sub, 1, .AcqRel) == 0) {
-                if (@atomicRmw(usize, ptr.weak, .Sub, 1, .AcqRel) == 0) {
+            if (@atomicRmw(usize, &ptr.strong, .Sub, 1, .AcqRel) == 1) {
+                if (@atomicRmw(usize, &ptr.weak, .Sub, 1, .AcqRel) == 1) {
                     self.alloc.destroy(ptr);
                 }
             }
@@ -268,9 +268,9 @@ pub fn Arc(comptime T: type) type {
         pub fn releaseWithFn(self: Self, comptime f: fn (T) void) void {
             const ptr = self.innerPtr();
 
-            if (@atomicRmw(usize, ptr.strong, .Sub, 1, .AcqRel) == 0) {
+            if (@atomicRmw(usize, ptr.strong, .Sub, 1, .AcqRel) == 1) {
                 f(self.value.*);
-                if (@atomicRmw(usize, ptr.weak, .Sub, 1, .AcqRel) == 0) {
+                if (@atomicRmw(usize, ptr.weak, .Sub, 1, .AcqRel) == 1) {
                     self.alloc.destroy(ptr);
                 }
             }
@@ -284,7 +284,7 @@ pub fn Arc(comptime T: type) type {
 
 /// A multi-threaded, weak reference to a reference-counted value.
 pub fn Aweak(comptime T: type) type {
-    if (builtin.single_thread) {
+    if (builtin.single_threaded) {
         return Weak(T);
     }
 
@@ -332,7 +332,7 @@ pub fn Aweak(comptime T: type) type {
                 const prev = @atomicLoad(usize, &ptr.strong, .Acquire);
 
                 if (prev == 0) {
-                    if (@atomicRmw(usize, &ptr.weak, .Sub, 1, .AcqRel) == 0) {
+                    if (@atomicRmw(usize, &ptr.weak, .Sub, 1, .AcqRel) == 1) {
                         self.alloc.destroy(*ptr);
                         self.ptr = null;
                     }
@@ -353,7 +353,7 @@ pub fn Aweak(comptime T: type) type {
         /// Decrements the weak reference count, deallocating if it reaches zero.
         pub fn release(self: *const Self) void {
             if (self.innerPtr()) |*ptr| {
-                if (@atomicRmw(usize, ptr.*.weak, .Sub, 1, .AcqRel) == 0) {
+                if (@atomicRmw(usize, ptr.*.weak, .Sub, 1, .AcqRel) == 1) {
                     self.alloc.destroy(ptr.*);
                     ptr.* = null;
                 }
