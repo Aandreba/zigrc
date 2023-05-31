@@ -35,8 +35,6 @@ jobs:
         uses: actions/configure-pages@v3
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: 0.10.1
       - name: Generate docs
         run: zig build
       - name: Upload artifact
