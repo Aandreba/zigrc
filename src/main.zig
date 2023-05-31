@@ -467,3 +467,13 @@ pub fn Arc(comptime T: type) type {
         };
     };
 }
+
+/// Creates a new `Rc` inferring the type of `value`
+pub fn rc(alloc: std.mem.Allocator, value: anytype) std.mem.Allocator.Error!Rc(@TypeOf(value)) {
+    return Rc(@TypeOf(value)).init(alloc, value);
+}
+
+/// Creates a new `Arc` inferring the type of `value`
+pub fn arc(alloc: std.mem.Allocator, value: anytype) std.mem.Allocator.Error!Arc(@TypeOf(value)) {
+    return Arc(@TypeOf(value)).init(alloc, value);
+}
