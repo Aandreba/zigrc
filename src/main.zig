@@ -1,6 +1,11 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+/// This variable is `true` if an atomic reference-counter is used for `Arc`, `false` otherwise.
+///
+/// If the target is single-threaded, `Arc` is optimized to a regular `Rc`.
+pub const atomic_arc = !builtin.single_threaded or (builtin.target.isWasm() and std.Target.wasm.featureSetHas(builtin.cpu.features, .atomics));
+
 /// A single threaded, strong reference to a reference-counted value.
 pub fn Rc(comptime T: type) type {
     return struct {
@@ -128,15 +133,13 @@ pub fn Rc(comptime T: type) type {
         }
 
         /// Total size (in bytes) of the reference counted value on the heap.
-        /// This value accounts for the extra memory required to count the references,
-        /// and is valid for single and multi-threaded refrence counters.
+        /// This value accounts for the extra memory required to count the references.
         pub fn innerSize() comptime_int {
             return Inner.innerSize();
         }
 
         /// Alignment (in bytes) of the reference counted value on the heap.
-        /// This value accounts for the extra memory required to count the references,
-        /// and is valid for single and multi-threaded refrence counters.
+        /// This value accounts for the extra memory required to count the references.
         pub fn innerAlign() comptime_int {
             return Inner.innerAlign();
         }
@@ -147,7 +150,7 @@ pub fn Rc(comptime T: type) type {
 
         /// A single threaded, weak reference to a reference-counted value.
         pub const Weak = struct {
-            inner: ?*align(@alignOf(Inner)) anyopaque = null,
+            inner: ?*Inner = null,
             alloc: std.mem.Allocator,
 
             /// Creates a new weak reference.
@@ -236,7 +239,7 @@ pub fn Rc(comptime T: type) type {
 
 /// A multi-threaded, strong reference to a reference-counted value.
 pub fn Arc(comptime T: type) type {
-    if (builtin.single_threaded) {
+    if (!atomic_arc) {
         return Rc(T);
     }
 
@@ -355,15 +358,13 @@ pub fn Arc(comptime T: type) type {
         }
 
         /// Total size (in bytes) of the reference counted value on the heap.
-        /// This value accounts for the extra memory required to count the references,
-        /// and is valid for single and multi-threaded refrence counters.
+        /// This value accounts for the extra memory required to count the references.
         pub fn innerSize() comptime_int {
             return Inner.innerSize();
         }
 
         /// Alignment (in bytes) of the reference counted value on the heap.
-        /// This value accounts for the extra memory required to count the references,
-        /// and is valid for single and multi-threaded refrence counters.
+        /// This value accounts for the extra memory required to count the references.
         pub fn innerAlign() comptime_int {
             return Inner.innerAlign();
         }
@@ -374,7 +375,7 @@ pub fn Arc(comptime T: type) type {
 
         /// A multi-threaded, weak reference to a reference-counted value.
         pub const Weak = struct {
-            inner: ?*align(@alignOf(Inner)) anyopaque = null,
+            inner: ?*Inner = null,
             alloc: std.mem.Allocator,
 
             /// Creates a new weak reference.
@@ -449,15 +450,13 @@ pub fn Arc(comptime T: type) type {
             }
 
             /// Total size (in bytes) of the reference counted value on the heap.
-            /// This value accounts for the extra memory required to count the references,
-            /// and is valid for single and multi-threaded refrence counters.
+            /// This value accounts for the extra memory required to count the references.
             pub fn innerSize() comptime_int {
                 return Inner.innerSize();
             }
 
             /// Alignment (in bytes) of the reference counted value on the heap.
-            /// This value accounts for the extra memory required to count the references,
-            /// and is valid for single and multi-threaded refrence counters.
+            /// This value accounts for the extra memory required to count the references.
             pub fn innerAlign() comptime_int {
                 return Inner.innerAlign();
             }
