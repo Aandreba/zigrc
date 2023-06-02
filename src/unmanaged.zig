@@ -1,33 +1,27 @@
 const std = @import("std");
 const builtin = @import("builtin");
-pub usingnamespace @import("unmanaged.zig");
-
-/// This variable is `true` if an atomic reference-counter is used for `Arc`, `false` otherwise.
-///
-/// If the target is single-threaded, `Arc` is optimized to a regular `Rc`.
-pub const atomic_arc = @import("consts.zig").atomic_arc;
+const atomic_arc = @import("consts.zig").atomic_arc;
 
 /// A single threaded, strong reference to a reference-counted value.
-pub fn Rc(comptime T: type) type {
-    return RcAligned(T, null);
+pub fn RcUnmanaged(comptime T: type) type {
+    return RcAlignedUnmanaged(T, null);
 }
 
 /// A multi-threaded, strong reference to a reference-counted value.
-pub fn Arc(comptime T: type) type {
-    return ArcAligned(T, null);
+pub fn ArcUnmanaged(comptime T: type) type {
+    return ArcAlignedUnmanaged(T, null);
 }
 
 /// A single threaded, strong reference to a reference-counted value.
-pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
+pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
     if (alignment) |al| {
         if (al == @alignOf(T)) {
-            return RcAligned(T, null);
+            return RcAlignedUnmanaged(T, null);
         }
     }
 
     return struct {
         value: if (alignment) |a| *align(a) T else *T,
-        alloc: std.mem.Allocator,
 
         const Self = @This();
         const Inner = struct {
@@ -48,7 +42,7 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
         pub fn init(alloc: std.mem.Allocator, t: T) std.mem.Allocator.Error!Self {
             const inner = try alloc.create(Inner);
             inner.* = Inner{ .strong = 1, .weak = 1, .value = t };
-            return Self{ .value = &inner.value, .alloc = alloc };
+            return Self{ .value = &inner.value };
         }
 
         /// Constructs a new `Rc` while giving you a `Weak` to the allocation,
@@ -59,7 +53,7 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
 
             // Strong references should collectively own a shared weak reference,
             // so don't run the destructor for our old weak reference.
-            var weak = Weak{ .inner = inner, .alloc = alloc };
+            var weak = Weak{ .inner = inner };
 
             // It's important we don't give up ownership of the weak pointer, or
             // else the memory might be freed by the time `data_fn` returns. If
@@ -72,7 +66,7 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
             std.debug.assert(inner.strong == 0);
             inner.strong = 1;
 
-            return Self{ .value = &inner.value, .alloc = alloc };
+            return Self{ .value = &inner.value };
         }
 
         /// Gets the number of strong references to this value.
@@ -98,14 +92,14 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
 
         /// Decrements the reference count, deallocating if the weak count reaches zero.
         /// The continued use of the pointer after calling `release` is undefined behaviour.
-        pub fn release(self: Self) void {
+        pub fn release(self: Self, alloc: std.mem.Allocator) void {
             const ptr = self.innerPtr();
 
             ptr.strong -= 1;
             if (ptr.strong == 0) {
                 ptr.weak -= 1;
                 if (ptr.weak == 0) {
-                    self.alloc.destroy(ptr);
+                    alloc.destroy(ptr);
                 }
             }
         }
@@ -113,16 +107,15 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
         /// Decrements the reference count, deallocating the weak count reaches zero,
         /// and executing `f` if the strong count reaches zero.
         /// The continued use of the pointer after calling `release` is undefined behaviour.
-        pub fn releaseWithFn(self: Self, comptime f: fn (T) void) void {
+        pub fn releaseWithFn(self: Self, alloc: std.mem.Allocator, comptime f: fn (T) void) void {
             const ptr = self.innerPtr();
 
             ptr.strong -= 1;
             if (ptr.strong == 0) {
                 f(self.value.*);
-
                 ptr.weak -= 1;
                 if (ptr.weak == 0) {
-                    self.alloc.destroy(ptr);
+                    alloc.destroy(ptr);
                 }
             }
         }
@@ -131,16 +124,15 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
         /// Otherwise, `null` is returned.
         /// This will succeed even if there are outstanding weak references.
         /// The continued use of the pointer if the method successfully returns `T` is undefined behaviour.
-        pub fn tryUnwrap(self: Self) ?T {
+        pub fn tryUnwrap(self: Self, alloc: std.mem.Allocator) ?T {
             const ptr = self.innerPtr();
 
             if (ptr.strong == 1) {
                 ptr.strong = 0;
                 const tmp = self.value.*;
-
                 ptr.weak -= 1;
                 if (ptr.weak == 0) {
-                    self.alloc.destroy(ptr);
+                    alloc.destroy(ptr);
                 }
 
                 return tmp;
@@ -168,13 +160,12 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
         /// A single threaded, weak reference to a reference-counted value.
         pub const Weak = struct {
             inner: ?*Inner = null,
-            alloc: std.mem.Allocator,
 
             /// Creates a new weak reference.
-            pub fn init(parent: *RcAligned(T, alignment)) Weak {
+            pub fn init(parent: *RcAlignedUnmanaged(T, alignment)) Weak {
                 const ptr = parent.innerPtr();
                 ptr.weak += 1;
-                return Weak{ .inner = ptr, .alloc = parent.alloc };
+                return Weak{ .inner = ptr };
             }
 
             /// Gets the number of strong references to this value.
@@ -203,32 +194,31 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
             /// Attempts to upgrade the weak pointer to an `Rc`, delaying dropping of the inner value if successful.
             ///
             /// Returns `null` if the inner value has since been dropped.
-            pub fn upgrade(self: *Weak) ?RcAligned(T, alignment) {
+            pub fn upgrade(self: *Weak, alloc: std.mem.Allocator) ?RcAlignedUnmanaged(T, alignment) {
                 const ptr = self.innerPtr() orelse return null;
 
                 if (ptr.strong == 0) {
                     ptr.weak -= 1;
                     if (ptr.weak == 0) {
-                        self.alloc.destroy(ptr);
+                        alloc.destroy(ptr);
                         self.inner = null;
                     }
                     return null;
                 }
 
                 ptr.strong += 1;
-                return RcAligned(T, alignment){
+                return RcAlignedUnmanaged(T, alignment){
                     .value = &ptr.value,
-                    .alloc = self.alloc,
                 };
             }
 
             /// Decrements the weak reference count, deallocating if it reaches zero.
             /// The continued use of the pointer after calling `release` is undefined behaviour.
-            pub fn release(self: Weak) void {
+            pub fn release(self: Weak, alloc: std.mem.Allocator) void {
                 if (self.innerPtr()) |ptr| {
                     ptr.weak -= 1;
                     if (ptr.weak == 0) {
-                        self.alloc.destroy(ptr);
+                        alloc.destroy(ptr);
                     }
                 }
             }
@@ -255,18 +245,17 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
 }
 
 /// A multi-threaded, strong reference to a reference-counted value.
-pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
+pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
     if (alignment) |al| {
         if (al == @alignOf(T)) {
-            return ArcAligned(T, null);
+            return ArcAlignedUnmanaged(T, null);
         }
     } else if (!atomic_arc) {
-        return RcAligned(T, alignment);
+        return RcAlignedUnmanaged(T);
     }
 
     return struct {
         value: if (alignment) |a| *align(a) T else *T,
-        alloc: std.mem.Allocator,
 
         const Self = @This();
         const Inner = struct {
@@ -287,7 +276,7 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
         pub fn init(alloc: std.mem.Allocator, t: T) std.mem.Allocator.Error!Self {
             const inner = try alloc.create(Inner);
             inner.* = Inner{ .strong = 1, .weak = 1, .value = t };
-            return Self{ .value = &inner.value, .alloc = alloc };
+            return Self{ .value = &inner.value };
         }
 
         /// Constructs a new `Arc` while giving you a `Aweak` to the allocation,
@@ -298,7 +287,7 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
 
             // Strong references should collectively own a shared weak reference,
             // so don't run the destructor for our old weak reference.
-            var weak = Weak{ .inner = inner, .alloc = alloc };
+            var weak = Weak{ .inner = inner };
 
             // It's important we don't give up ownership of the weak pointer, or
             // else the memory might be freed by the time `data_fn` returns. If
@@ -309,7 +298,7 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
             inner.value = data_fn(&weak);
 
             std.debug.assert(@atomicRmw(usize, &inner.strong, .Add, 1, .Release) == 0);
-            return Self{ .value = &inner.value, .alloc = alloc };
+            return Self{ .value = &inner.value };
         }
 
         /// Gets the number of strong references to this value.
@@ -335,12 +324,12 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
 
         /// Decrements the reference count, deallocating if the weak count reaches zero.
         /// The continued use of the pointer after calling `release` is undefined behaviour.
-        pub fn release(self: Self) void {
+        pub fn release(self: Self, alloc: std.mem.Allocator) void {
             const ptr = self.innerPtr();
 
             if (@atomicRmw(usize, &ptr.strong, .Sub, 1, .AcqRel) == 1) {
                 if (@atomicRmw(usize, &ptr.weak, .Sub, 1, .AcqRel) == 1) {
-                    self.alloc.destroy(ptr);
+                    alloc.destroy(ptr);
                 }
             }
         }
@@ -348,13 +337,13 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
         /// Decrements the reference count, deallocating the weak count reaches zero,
         /// and executing `f` if the strong count reaches zero.
         /// The continued use of the pointer after calling `release` is undefined behaviour.
-        pub fn releaseWithFn(self: Self, comptime f: fn (T) void) void {
+        pub fn releaseWithFn(self: Self, alloc: std.mem.Allocator, comptime f: fn (T) void) void {
             const ptr = self.innerPtr();
 
             if (@atomicRmw(usize, &ptr.strong, .Sub, 1, .AcqRel) == 1) {
                 f(self.value.*);
                 if (@atomicRmw(usize, &ptr.weak, .Sub, 1, .AcqRel) == 1) {
-                    self.alloc.destroy(ptr);
+                    alloc.destroy(ptr);
                 }
             }
         }
@@ -363,14 +352,14 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
         /// Otherwise, `null` is returned.
         /// This will succeed even if there are outstanding weak references.
         /// The continued use of the pointer if the method successfully returns `T` is undefined behaviour.
-        pub fn tryUnwrap(self: Self) ?T {
+        pub fn tryUnwrap(self: Self, alloc: std.mem.Allocator) ?T {
             const ptr = self.innerPtr();
 
             if (@cmpxchgStrong(usize, &ptr.strong, 1, 0, .Monotonic, .Monotonic) == null) {
                 ptr.strong = 0;
                 const tmp = self.value.*;
                 if (@atomicRmw(usize, &ptr.weak, .Sub, 1, .AcqRel) == 1) {
-                    self.alloc.destroy(ptr);
+                    alloc.destroy(ptr);
                 }
                 return tmp;
             }
@@ -397,13 +386,12 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
         /// A multi-threaded, weak reference to a reference-counted value.
         pub const Weak = struct {
             inner: ?*Inner = null,
-            alloc: std.mem.Allocator,
 
             /// Creates a new weak reference.
-            pub fn init(parent: *ArcAligned(T, alignment)) Weak {
+            pub fn init(parent: *ArcAlignedUnmanaged(T, alignment)) Weak {
                 const ptr = parent.innerPtr();
                 _ = @atomicRmw(usize, &ptr.weak, .Add, 1, .AcqRel);
-                return Weak{ .inner = ptr, .alloc = parent.alloc };
+                return Weak{ .inner = ptr };
             }
 
             /// Gets the number of strong references to this value.
@@ -435,7 +423,7 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
             /// Attempts to upgrade the weak pointer to an `Arc`, delaying dropping of the inner value if successful.
             ///
             /// Returns `null` if the inner value has since been dropped.
-            pub fn upgrade(self: *Weak) ?ArcAligned(T, alignment) {
+            pub fn upgrade(self: *Weak, alloc: ?std.mem.Allocator) ?ArcAlignedUnmanaged(T, alignment) {
                 const ptr = self.innerPtr() orelse return null;
 
                 while (true) {
@@ -443,16 +431,17 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
 
                     if (prev == 0) {
                         if (@atomicRmw(usize, &ptr.weak, .Sub, 1, .AcqRel) == 1) {
-                            self.alloc.destroy(ptr);
-                            self.inner = null;
+                            if (alloc) |allocator| {
+                                allocator.destroy(ptr);
+                                self.inner = null;
+                            }
                         }
                         return null;
                     }
 
                     if (@cmpxchgStrong(usize, &ptr.strong, prev, prev + 1, .Acquire, .Monotonic) == null) {
-                        return ArcAligned(T, alignment){
+                        return ArcAlignedUnmanaged(T){
                             .value = &ptr.value,
-                            .alloc = self.alloc,
                         };
                     }
 
@@ -462,10 +451,10 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
 
             /// Decrements the weak reference count, deallocating if it reaches zero.
             /// The continued use of the pointer after calling `release` is undefined behaviour.
-            pub fn release(self: Weak) void {
+            pub fn release(self: Weak, alloc: std.mem.Allocator) void {
                 if (self.innerPtr()) |ptr| {
                     if (@atomicRmw(usize, &ptr.weak, .Sub, 1, .AcqRel) == 1) {
-                        self.alloc.destroy(ptr);
+                        alloc.destroy(ptr);
                     }
                 }
             }
@@ -489,22 +478,22 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
     };
 }
 
-/// Creates a new `Rc` inferring the type of `value`
-pub fn rc(alloc: std.mem.Allocator, value: anytype) std.mem.Allocator.Error!Rc(@TypeOf(value)) {
-    return RcAligned(@TypeOf(value)).init(alloc, value);
+/// Creates a new `RcAlignedUnmanaged` inferring the type of `value`
+pub fn rcAlignedUnmanaged(comptime alignment: ?u29, alloc: std.mem.Allocator, value: anytype) std.mem.Allocator.Error!RcAlignedUnmanaged(@TypeOf(value), alignment) {
+    return RcAlignedUnmanaged(@TypeOf(value)).init(alloc, value);
 }
 
-/// Creates a new `RcAligned` inferring the type of `value`
-pub fn rcAligned(comptime alignment: ?u29, alloc: std.mem.Allocator, value: anytype) std.mem.Allocator.Error!RcAligned(@TypeOf(value), alignment) {
-    return RcAligned(@TypeOf(value)).init(alloc, value);
+/// Creates a new `RcUnmanaged` inferring the type of `value`
+pub fn rcUnmanaged(alloc: std.mem.Allocator, value: anytype) std.mem.Allocator.Error!RcUnmanaged(@TypeOf(value)) {
+    return RcUnmanaged(@TypeOf(value)).init(alloc, value);
 }
 
-/// Creates a new `Arc` inferring the type of `value`
-pub fn arc(alloc: std.mem.Allocator, value: anytype) std.mem.Allocator.Error!Arc(@TypeOf(value)) {
-    return Arc(@TypeOf(value)).init(alloc, value);
+/// Creates a new `ArcAlignedUnmanaged` inferring the type of `value`
+pub fn arcAlignedUnmanaged(comptime alignment: ?u29, alloc: std.mem.Allocator, value: anytype) std.mem.Allocator.Error!ArcAlignedUnmanaged(@TypeOf(value), alignment) {
+    return ArcAlignedUnmanaged(@TypeOf(value)).init(alloc, value);
 }
 
-/// Creates a new `ArcAligned` inferring the type of `value`
-pub fn arcAligned(comptime alignment: ?u29, alloc: std.mem.Allocator, value: anytype) std.mem.Allocator.Error!ArcAligned(@TypeOf(value), alignment) {
-    return ArcAligned(@TypeOf(value)).init(alloc, value);
+/// Creates a new `ArcUnmanaged` inferring the type of `value`
+pub fn arcUnmanaged(alloc: std.mem.Allocator, value: anytype) std.mem.Allocator.Error!ArcUnmanaged(@TypeOf(value)) {
+    return ArcUnmanaged(@TypeOf(value)).init(alloc, value);
 }
