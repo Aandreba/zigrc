@@ -160,6 +160,15 @@ pub fn Rc(comptime T: type) type {
                 return Weak{ .inner = ptr, .alloc = parent.alloc };
             }
 
+            /// Creates a new weak reference object from a pointer to it's underlying value,
+            /// without increasing the weak count.
+            pub fn fromValuePtr(value: *T, alloc: std.mem.Allocator) Weak {
+                return .{
+                    .inner = @fieldParentPtr(Inner, "value", value),
+                    .alloc = alloc
+                };
+            }
+
             /// Gets the number of strong references to this value.
             pub fn strongCount(self: *const Weak) usize {
                 return (self.innerPtr() orelse return 0).strong;
@@ -383,6 +392,15 @@ pub fn Arc(comptime T: type) type {
                 const ptr = parent.innerPtr();
                 _ = @atomicRmw(usize, &ptr.weak, .Add, 1, .AcqRel);
                 return Weak{ .inner = ptr, .alloc = parent.alloc };
+            }
+
+            /// Creates a new weak reference object from a pointer to it's underlying value,
+            /// without increasing the weak count.
+            pub fn fromValuePtr(value: *T, alloc: std.mem.Allocator) Weak {
+                return .{
+                    .inner = @fieldParentPtr(Inner, "value", value),
+                    .alloc = alloc
+                };
             }
 
             /// Gets the number of strong references to this value.
