@@ -231,7 +231,7 @@ pub fn Rc(comptime T: type) type {
             }
 
             inline fn innerPtr(self: *const Weak) ?*Inner {
-                return @ptrCast(?*Inner, self.inner);
+                return @as(?*Inner, @ptrCast(self.inner));
             }
         };
     };
@@ -462,7 +462,7 @@ pub fn Arc(comptime T: type) type {
             }
 
             inline fn innerPtr(self: *const Weak) ?*Inner {
-                return @ptrCast(?*Inner, self.inner);
+                return @as(?*Inner, @ptrCast(self.inner));
             }
         };
     };

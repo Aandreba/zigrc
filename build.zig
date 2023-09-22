@@ -70,16 +70,22 @@ fn build_v11(b: *std.Build) void {
     // Docs
     const docs = b.addStaticLibrary(.{
         .name = "zig-rc",
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = std.build.LazyPath.relative("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
-    docs.emit_docs = .emit;
+
+    _ = b.addInstallDirectory(.{
+        .source_dir = docs.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    });
+
     b.installArtifact(docs);
 
     // Tests
     const main_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/tests.zig" },
+        .root_source_file = std.build.LazyPath.relative("src/tests.zig"),
     });
     const run_main_tests = b.addRunArtifact(main_tests);
 
@@ -97,7 +103,7 @@ fn build_v11(b: *std.Build) void {
 
     // Examples
     const example = b.addTest(.{
-        .root_source_file = .{ .path = "src/example.zig" },
+        .root_source_file = std.build.LazyPath.relative("src/example.zig"),
     });
     const run_example = b.addRunArtifact(example);
     const example_step = b.step("example", "Run library example");

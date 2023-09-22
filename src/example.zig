@@ -51,7 +51,7 @@ test "example" {
 fn thread_exec(data: Arc) !void {
     defer data.releaseWithFn(Data.deinit);
 
-    var rng = std.rand.DefaultPrng.init(@bitCast(u64, @truncate(i64, std.time.nanoTimestamp())));
+    var rng = std.rand.DefaultPrng.init(@as(u64, @bitCast(@as(i64, @truncate(std.time.nanoTimestamp())))));
 
     data.value.mutex.lock();
     defer data.value.mutex.unlock();
