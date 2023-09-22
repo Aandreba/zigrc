@@ -75,11 +75,13 @@ fn build_v11(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    _ = b.addInstallDirectory(.{
+    const docsget = b.addInstallDirectory(.{
         .source_dir = docs.getEmittedDocs(),
         .install_dir = .prefix,
         .install_subdir = "docs",
     });
+
+    b.default_step.dependOn(&docsget.step);
 
     b.installArtifact(docs);
 
