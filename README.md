@@ -7,7 +7,7 @@ Reference-counted pointers for Zig inspired by Rust's [`Rc`](https://doc.rust-la
 
 ## How to use
 
-To use `zigrc`, import the `src/main.zig` file into your project, or [add it as a module](https://ziglearn.org/chapter-3/#modules) on your build file.
+To use `zigrc`, import the `src/main.zig` file into your project, or [add it as a module](https://zig.guide/build-system/modules) on your build file.
 
 ## Example
 
