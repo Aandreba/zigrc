@@ -4,12 +4,23 @@ const Allocator = std.mem.Allocator;
 
 /// A single threaded, strong reference to a reference-counted value.
 pub fn Rc(comptime T: type) type {
+    return RcAligned(T, null);
+}
+
+/// A single threaded, strong reference to a reference-counted value.
+pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
+    if (alignment) |a| {
+        if (a == @alignOf(T)) {
+            return RcAligned(T, null);
+        }
+    }
+
     return struct {
-        value: *T,
+        value: if (alignment) |a| *align(a) T else *T,
         alloc: Allocator,
 
         const Self = @This();
-        const Unmanaged = RcUnmanaged(T);
+        const Unmanaged = RcAlignedUnmanaged(T, alignment);
         const Inner = Unmanaged.Inner;
 
         /// Creates a new reference-counted value.
@@ -114,7 +125,7 @@ pub fn Rc(comptime T: type) type {
             const WeakUnmanaged = Unmanaged.Weak;
 
             /// Creates a new weak reference.
-            pub fn init(parent: Rc(T)) Weak {
+            pub fn init(parent: RcAligned(T, alignment)) Weak {
                 return Weak{
                     .inner = WeakUnmanaged.init(parent.asUnmanaged()).inner,
                     .alloc = parent.alloc,
@@ -123,7 +134,7 @@ pub fn Rc(comptime T: type) type {
 
             /// Creates a new weak reference object from a pointer to it's underlying value,
             /// without increasing the weak count.
-            pub fn fromValuePtr(value: *T) Weak {
+            pub fn fromValuePtr(value: if (alignment) |a| *align(a) T else *T) Weak {
                 return .{ .inner = @fieldParentPtr("value", value) };
             }
 
@@ -146,7 +157,7 @@ pub fn Rc(comptime T: type) type {
             /// Attempts to upgrade the weak pointer to an `Rc`, delaying dropping of the inner value if successful.
             ///
             /// Returns `null` if the inner value has since been dropped.
-            pub fn upgrade(self: *Weak) ?Rc(T) {
+            pub fn upgrade(self: *Weak) ?RcAligned(T, alignment) {
                 const ptr = self.innerPtr() orelse return null;
 
                 if (ptr.strong == 0) {
@@ -198,14 +209,24 @@ pub fn Rc(comptime T: type) type {
 
 /// A multi-threaded, strong reference to a reference-counted value.
 pub fn Arc(comptime T: type) type {
-    if (builtin.single_threaded) return Rc(T);
+    return ArcAligned(T, null);
+}
+
+/// A multi-threaded, strong reference to a reference-counted value.
+pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
+    if (builtin.single_threaded) return RcAligned(T, alignment);
+    if (alignment) |a| {
+        if (a == @alignOf(T)) {
+            return ArcAligned(T, null);
+        }
+    }
 
     return struct {
-        value: *T,
+        value: if (alignment) |a| *align(a) T else *T,
         alloc: Allocator,
 
         const Self = @This();
-        const Unmanaged = ArcUnmanaged(T);
+        const Unmanaged = ArcAlignedUnmanaged(T, alignment);
         const Inner = Unmanaged.Inner;
 
         /// Creates a new reference-counted value.
@@ -308,7 +329,7 @@ pub fn Arc(comptime T: type) type {
             const UnmanagedWeak = Unmanaged.Weak;
 
             /// Creates a new weak reference.
-            pub fn init(parent: Arc(T)) Weak {
+            pub fn init(parent: ArcAligned(T, alignment)) Weak {
                 return Weak{
                     .inner = UnmanagedWeak.init(parent.asUnmanaged()).inner,
                     .alloc = parent.alloc,
@@ -317,7 +338,7 @@ pub fn Arc(comptime T: type) type {
 
             /// Creates a new weak reference object from a pointer to it's underlying value,
             /// without increasing the weak count.
-            pub fn fromValuePtr(value: *T, alloc: Allocator) Weak {
+            pub fn fromValuePtr(value: if (alignment) |a| *align(a) T else *T, alloc: Allocator) Weak {
                 return .{ .inner = @fieldParentPtr("value", value), .alloc = alloc };
             }
 
@@ -340,7 +361,7 @@ pub fn Arc(comptime T: type) type {
             /// Attempts to upgrade the weak pointer to an `Arc`, delaying dropping of the inner value if successful.
             ///
             /// Returns `null` if the inner value has since been dropped.
-            pub fn upgrade(self: *Weak) ?Arc(T) {
+            pub fn upgrade(self: *Weak) ?ArcAligned(T, alignment) {
                 const ptr = self.innerPtr() orelse return null;
 
                 while (true) {
