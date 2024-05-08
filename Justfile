@@ -4,6 +4,7 @@ coverage: clean
 
 docs:
     zig build
+    bun run docs/index.ts
 
 test:
     zig test src/tests.zig

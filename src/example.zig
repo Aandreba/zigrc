@@ -1,5 +1,5 @@
 const std = @import("std");
-const rc = @import("main.zig");
+const rc = @import("root.zig");
 
 const Thread = std.Thread;
 const Mutex = Thread.Mutex;

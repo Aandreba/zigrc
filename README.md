@@ -1,5 +1,5 @@
 ![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Aandreba/zigrc/tests.yml)
-[![Docs](https://img.shields.io/badge/docs-zig-blue)](https://aandreba.github.io/zigrc/)
+[![Docs](https://img.shields.io/badge/docs-zig-blue)](https://aandreba.github.io/zigrc/#zig-rc.main)
 
 # zigrc
 
