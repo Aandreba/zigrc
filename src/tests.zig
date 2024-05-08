@@ -65,7 +65,7 @@ test "cyclic" {
         const Weak = Rc.Weak;
 
         pub fn init(allocator: std.mem.Allocator) !Rc {
-            return Rc.initCyclic(allocator, Self.data_fn);
+            return Rc.initCyclic(allocator, Self.data_fn, .{});
         }
 
         pub fn me(self: *Self) Rc {
@@ -82,7 +82,7 @@ test "cyclic" {
     };
 
     var gadget = try Gadget.init(alloc);
-    defer gadget.releaseWithFn(Gadget.deinit);
+    defer gadget.releaseWithFn(Gadget.deinit, .{});
 
     try expect(gadget.strongCount() == 1);
     try expect(gadget.weakCount() == 1);
@@ -149,7 +149,7 @@ test "cyclic atomic" {
         const Weak = Rc.Weak;
 
         pub fn init(allocator: std.mem.Allocator) !Rc {
-            return Rc.initCyclic(allocator, Self.data_fn);
+            return Rc.initCyclic(allocator, Self.data_fn, .{});
         }
 
         pub fn me(self: *Self) Rc {
@@ -166,7 +166,7 @@ test "cyclic atomic" {
     };
 
     var gadget = try Gadget.init(alloc);
-    defer gadget.releaseWithFn(Gadget.deinit);
+    defer gadget.releaseWithFn(Gadget.deinit, .{});
 
     try expect(gadget.strongCount() == 1);
     try expect(gadget.weakCount() == 1);

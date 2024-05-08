@@ -33,7 +33,8 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
 
         /// Constructs a new `Rc` while giving you a `Weak` to the allocation,
         /// to allow you to construct a `T` which holds a weak pointer to itself.
-        pub fn initCyclic(alloc: Allocator, comptime data_fn: fn (*Weak) T) Allocator.Error!Self {
+        /// `data_fn` has the signature `fn(*Weak, ...data_args) T`
+        pub fn initCyclic(alloc: Allocator, comptime data_fn: anytype, data_args: anytype) Allocator.Error!Self {
             const inner = try alloc.create(Inner);
             inner.* = Inner{ .strong = 0, .weak = 1, .value = undefined };
 
@@ -47,7 +48,7 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
             // weak pointer for ourselves, but this would result in additional
             // updates to the weak reference count which might not be necessary
             // otherwise.
-            inner.value = data_fn(&weak);
+            inner.value = @call(.auto, data_fn, .{&weak} ++ data_args);
 
             std.debug.assert(inner.strong == 0);
             inner.strong = 1;
@@ -84,9 +85,10 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
 
         /// Decrements the reference count, deallocating the weak count reaches zero,
         /// and executing `f` if the strong count reaches zero.
+        /// The `f` function has a signature of `fn(*T, ...args)` or `fn(T, ...args)`
         /// The continued use of the pointer after calling `release` is undefined behaviour.
-        pub fn releaseWithFn(self: Self, comptime f: fn (T) void) void {
-            return self.asUnmanaged().releaseWithFn(self.alloc, f);
+        pub fn releaseWithFn(self: Self, comptime f: anytype, args: anytype) void {
+            return self.asUnmanaged().releaseWithFn(self.alloc, f, args);
         }
 
         /// Returns the inner value, if the `Rc` has exactly one strong reference.
@@ -239,7 +241,8 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
 
         /// Constructs a new `Arc` while giving you a `Aweak` to the allocation,
         /// to allow you to construct a `T` which holds a weak pointer to itself.
-        pub fn initCyclic(alloc: Allocator, comptime data_fn: fn (*Weak) T) Allocator.Error!Self {
+        /// `data_fn` has the signature `fn(*Weak, ...data_args) T`
+        pub fn initCyclic(alloc: Allocator, comptime data_fn: anytype, data_args: anytype) Allocator.Error!Self {
             const inner = try alloc.create(Inner);
             inner.* = Inner{ .strong = 0, .weak = 1, .value = undefined };
 
@@ -253,7 +256,7 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
             // weak pointer for ourselves, but this would result in additional
             // updates to the weak reference count which might not be necessary
             // otherwise.
-            inner.value = data_fn(&weak);
+            inner.value = @call(.auto, data_fn, .{&weak} ++ data_args);
 
             std.debug.assert(@atomicRmw(usize, &inner.strong, .Add, 1, .release) == 0);
             return Self{ .value = &inner.value, .alloc = alloc };
@@ -288,9 +291,10 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
 
         /// Decrements the reference count, deallocating the weak count reaches zero,
         /// and executing `f` if the strong count reaches zero.
+        /// The `f` function has a signature of `fn(*T, ...args)` or `fn(T, ...args)`
         /// The continued use of the pointer after calling `release` is undefined behaviour.
-        pub fn releaseWithFn(self: Self, comptime f: fn (T) void) void {
-            return self.asUnmanaged().releaseWithFn(self.alloc, f);
+        pub fn releaseWithFn(self: Self, comptime f: anytype, args: anytype) void {
+            return self.asUnmanaged().releaseWithFn(self.alloc, f, args);
         }
 
         /// Returns the inner value, if the `Arc` has exactly one strong reference.
@@ -455,7 +459,8 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
 
         /// Constructs a new `Rc` while giving you a `Weak` to the allocation,
         /// to allow you to construct a `T` which holds a weak pointer to itself.
-        pub fn initCyclic(alloc: Allocator, comptime data_fn: fn (*Weak) T) Allocator.Error!Self {
+        /// `data_fn` has the signature `fn(*Weak, ...data_args) T`
+        pub fn initCyclic(alloc: Allocator, comptime data_fn: anytype, data_args: anytype) Allocator.Error!Self {
             const inner = try alloc.create(Inner);
             inner.* = Inner{ .strong = 0, .weak = 1, .value = undefined };
 
@@ -469,7 +474,7 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
             // weak pointer for ourselves, but this would result in additional
             // updates to the weak reference count which might not be necessary
             // otherwise.
-            inner.value = data_fn(&weak);
+            inner.value = @call(.auto, data_fn, .{&weak} ++ data_args);
 
             std.debug.assert(inner.strong == 0);
             inner.strong = 1;
@@ -514,13 +519,18 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
 
         /// Decrements the reference count, deallocating the weak count reaches zero,
         /// and executing `f` if the strong count reaches zero.
+        /// The `f` function has a signature of `fn(*T, ...args)` or `fn(T, ...args)`
         /// The continued use of the pointer after calling `release` is undefined behaviour.
-        pub fn releaseWithFn(self: Self, allocator: Allocator, comptime f: fn (T) void) void {
+        pub fn releaseWithFn(self: Self, allocator: Allocator, comptime f: anytype, args: anytype) void {
             const ptr = self.innerPtr();
 
             ptr.strong -= 1;
             if (ptr.strong == 0) {
-                f(self.value.*);
+                if (comptime @typeInfo(@TypeOf(f)).Fn.params[0].type == T) {
+                    @call(.auto, f, .{self.value.*} ++ args);
+                } else {
+                    @call(.auto, f, .{self.value} ++ args);
+                }
 
                 ptr.weak -= 1;
                 if (ptr.weak == 0) {
@@ -701,7 +711,8 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
 
         /// Constructs a new `Arc` while giving you a `Aweak` to the allocation,
         /// to allow you to construct a `T` which holds a weak pointer to itself.
-        pub fn initCyclic(alloc: Allocator, comptime data_fn: fn (*Weak) T) Allocator.Error!Self {
+        /// `data_fn` has the signature `fn(*Weak, ...data_args) T`
+        pub fn initCyclic(alloc: Allocator, comptime data_fn: anytype, data_args: anytype) Allocator.Error!Self {
             const inner = try alloc.create(Inner);
             inner.* = Inner{ .strong = 0, .weak = 1, .value = undefined };
 
@@ -715,7 +726,7 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
             // weak pointer for ourselves, but this would result in additional
             // updates to the weak reference count which might not be necessary
             // otherwise.
-            inner.value = data_fn(&weak);
+            inner.value = @call(.auto, data_fn, .{&weak} ++ data_args);
 
             std.debug.assert(@atomicRmw(usize, &inner.strong, .Add, 1, .release) == 0);
             return Self{ .value = &inner.value, .alloc = alloc };
@@ -756,12 +767,18 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
 
         /// Decrements the reference count, deallocating the weak count reaches zero,
         /// and executing `f` if the strong count reaches zero.
+        /// The `f` function has a signature of `fn(*T, ...args)` or `fn(T, ...args)`
         /// The continued use of the pointer after calling `release` is undefined behaviour.
-        pub fn releaseWithFn(self: Self, allocator: Allocator, comptime f: fn (T) void) void {
+        pub fn releaseWithFn(self: Self, allocator: Allocator, comptime f: anytype, args: anytype) void {
             const ptr = self.innerPtr();
 
             if (@atomicRmw(usize, &ptr.strong, .Sub, 1, .acq_rel) == 1) {
-                f(self.value.*);
+                if (comptime @typeInfo(@TypeOf(f)).Fn.params[0].type == T) {
+                    @call(.auto, f, .{self.value.*} ++ args);
+                } else {
+                    @call(.auto, f, .{self.value} ++ args);
+                }
+
                 if (@atomicRmw(usize, &ptr.weak, .Sub, 1, .acq_rel) == 1) {
                     allocator.destroy(ptr);
                 }
