@@ -27,7 +27,7 @@ fn build_v10(b: *std.build.Builder) void {
     const coverage = b.option(bool, "coverage", "Generate test coverage") orelse false;
 
     // Docs
-    const docs = b.addStaticLibrary("zig-rc", "src/main.zig");
+    const docs = b.addStaticLibrary("zig-rc", "src/root.zig");
     docs.emit_docs = .emit;
     docs.setBuildMode(mode);
     docs.install();
@@ -39,7 +39,7 @@ fn build_v10(b: *std.build.Builder) void {
     if (coverage) {
         main_tests.setExecCmd(&[_]?[]const u8{
             "kcov",
-            "--include-pattern=src/main.zig,src/tests.zig",
+            "--include-pattern=src/root.zig,src/tests.zig",
             "kcov-out",
             null, // to get zig to use the --test-cmd-bin flag
         });
@@ -72,7 +72,7 @@ fn build_v11(b: *std.Build) void {
     // Docs
     const docs = b.addStaticLibrary(.{
         .name = "zig-rc",
-        .root_source_file = std.build.LazyPath.relative("src/main.zig"),
+        .root_source_file = std.build.LazyPath.relative("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -96,7 +96,7 @@ fn build_v11(b: *std.Build) void {
     if (coverage) {
         main_tests.setExecCmd(&[_]?[]const u8{
             "kcov",
-            "--include-pattern=src/main.zig,src/tests.zig",
+            "--include-pattern=src/root.zig,src/tests.zig",
             "kcov-out",
             null, // to get zig to use the --test-cmd-bin flag
         });
@@ -131,7 +131,7 @@ fn build_v12(b: *std.Build) void {
     // Docs
     const docs = b.addStaticLibrary(.{
         .name = "zig-rc",
-        .root_source_file = b.path("src/main.zig"),
+        .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -155,7 +155,7 @@ fn build_v12(b: *std.Build) void {
     if (coverage) {
         main_tests.setExecCmd(&[_]?[]const u8{
             "kcov",
-            "--include-pattern=src/main.zig,src/tests.zig",
+            "--include-pattern=src/root.zig,src/tests.zig",
             "kcov-out",
             null, // to get zig to use the --test-cmd-bin flag
         });

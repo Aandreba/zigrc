@@ -1,9 +1,11 @@
 coverage: clean
-    zig build test
-    kcov --include-pattern=src/main.zig,src/tests.zig kcov-out zig-cache/o/**/test
+    zig build test -Doptimize=Debug
+    kcov --include-pattern=src/root.zig,src/tests.zig kcov-out zig-cache/o/**/test
 
 docs:
     zig build
+    xdg-open http://localhost:3000/
+    bun run docs/index.ts
 
 test:
     zig test src/tests.zig
