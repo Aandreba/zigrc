@@ -85,7 +85,7 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
 
         /// Decrements the reference count, deallocating the weak count reaches zero,
         /// and executing `f` if the strong count reaches zero.
-        /// The `f` function has a signature of `fn(*T, ...args)` or `fn(T, ...args)`
+        /// The `f` function has a signature of `fn(*T, ...args)` or `fn(T, ...args)`.
         /// The continued use of the pointer after calling `release` is undefined behaviour.
         pub fn releaseWithFn(self: Self, comptime f: anytype, args: anytype) void {
             return self.asUnmanaged().releaseWithFn(self.alloc, f, args);
@@ -291,7 +291,7 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
 
         /// Decrements the reference count, deallocating the weak count reaches zero,
         /// and executing `f` if the strong count reaches zero.
-        /// The `f` function has a signature of `fn(*T, ...args)` or `fn(T, ...args)`
+        /// The `f` function has a signature of `fn(*T, ...args)` or `fn(T, ...args)`.
         /// The continued use of the pointer after calling `release` is undefined behaviour.
         pub fn releaseWithFn(self: Self, comptime f: anytype, args: anytype) void {
             return self.asUnmanaged().releaseWithFn(self.alloc, f, args);
@@ -519,7 +519,7 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
 
         /// Decrements the reference count, deallocating the weak count reaches zero,
         /// and executing `f` if the strong count reaches zero.
-        /// The `f` function has a signature of `fn(*T, ...args)` or `fn(T, ...args)`
+        /// The `f` function has a signature of `fn(*T, ...args)` or `fn(T, ...args)`.
         /// The continued use of the pointer after calling `release` is undefined behaviour.
         pub fn releaseWithFn(self: Self, allocator: Allocator, comptime f: anytype, args: anytype) void {
             const ptr = self.innerPtr();
@@ -767,7 +767,7 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
 
         /// Decrements the reference count, deallocating the weak count reaches zero,
         /// and executing `f` if the strong count reaches zero.
-        /// The `f` function has a signature of `fn(*T, ...args)` or `fn(T, ...args)`
+        /// The `f` function has a signature of `fn(*T, ...args)` or `fn(T, ...args)`.
         /// The continued use of the pointer after calling `release` is undefined behaviour.
         pub fn releaseWithFn(self: Self, allocator: Allocator, comptime f: anytype, args: anytype) void {
             const ptr = self.innerPtr();
