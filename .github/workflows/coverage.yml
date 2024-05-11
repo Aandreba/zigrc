@@ -18,7 +18,7 @@ jobs:
       - run: zig build test -Doptimize=Debug
       - uses: crubalcaba/kcov-action@v1
         with:
-          cli-args: "--include-pattern=src/root.zig,src/tests.zig kcov-out zig-cache/o/**/test"
+          cli-args: --include-pattern=src/root.zig,src/tests.zig kcov-out zig-cache/o/**/test
       - uses: actions/upload-artifact@v4
         with:
           name: Code Coverage
