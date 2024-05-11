@@ -171,3 +171,47 @@ test "cyclic atomic" {
     try expect(gadget.strongCount() == 1);
     try expect(gadget.weakCount() == 1);
 }
+
+test "aligned unmanaged aligned" {
+    var five = try rc.RcAlignedUnmanaged(i32, 16).init(std.testing.allocator, 5);
+    errdefer five.release(std.testing.allocator);
+
+    try expect(std.meta.alignment(@TypeOf(five.value)) == 16);
+    five.value.* += 1;
+    try expect(five.value.* == 6);
+
+    try expect(five.strongCount() == 1);
+    try expect(five.weakCount() == 0);
+
+    var next_five = five.retain();
+    try expect(next_five.strongCount() == 2);
+    try expect(five.weakCount() == 0);
+    next_five.release(std.testing.allocator);
+
+    try expect(five.strongCount() == 1);
+    try expect(five.weakCount() == 0);
+
+    try expect(five.tryUnwrap(std.testing.allocator) != null);
+}
+
+test "aligned unmanaged atomic" {
+    var five = try rc.ArcAlignedUnmanaged(i32, 16).init(std.testing.allocator, 5);
+    errdefer five.release(std.testing.allocator);
+
+    try expect(std.meta.alignment(@TypeOf(five.value)) == 16);
+    five.value.* += 1;
+    try expect(five.value.* == 6);
+
+    try expect(five.strongCount() == 1);
+    try expect(five.weakCount() == 0);
+
+    var next_five = five.retain();
+    try expect(next_five.strongCount() == 2);
+    try expect(five.weakCount() == 0);
+    next_five.release(std.testing.allocator);
+
+    try expect(five.strongCount() == 1);
+    try expect(five.weakCount() == 0);
+
+    try expect(five.tryUnwrap(std.testing.allocator) != null);
+}
