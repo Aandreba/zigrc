@@ -4,6 +4,8 @@ on:
   # Triggers the workflow on push or pull request events but only for the "master" branch
   push:
     branches: ["master"]
+  pull_request:
+    branches: ["master"]
 
 jobs:
   coverage:
@@ -17,3 +19,9 @@ jobs:
       - uses: crubalcaba/kcov-action@v1
         with:
           cli-args: "--include-pattern=src/root.zig,src/tests.zig kcov-out zig-cache/o/**/test"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Code Coverage
+          path: kcov-out/
+          retention-days: 14
+          if-no-files-found: fail
