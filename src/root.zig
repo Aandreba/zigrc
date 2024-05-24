@@ -137,7 +137,7 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
             /// Creates a new weak reference object from a pointer to it's underlying value,
             /// without increasing the weak count.
             pub fn fromValuePtr(value: if (alignment) |a| *align(a) T else *T) Weak {
-                return .{ .inner = @fieldParentPtr("value", value) };
+                return .{ .inner = @alignCast(@fieldParentPtr("value", value)) };
             }
 
             /// Gets the number of strong references to this value.
@@ -834,7 +834,7 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
             /// Creates a new weak reference object from a pointer to it's underlying value,
             /// without increasing the weak count.
             pub fn fromValuePtr(value: *T) Weak {
-                return .{ .inner = @fieldParentPtr("value", value) };
+                return .{ .inner = @alignCast(@fieldParentPtr("value", value)) };
             }
 
             /// Gets the number of strong references to this value.
