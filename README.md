@@ -7,8 +7,23 @@ Reference-counted pointers for Zig inspired by Rust's [`Rc`](https://doc.rust-la
 
 ## How to use
 
-To use `zigrc`, import the `src/main.zig` file into your project, or [add it as a module](https://zig.guide/build-system/modules) on your build file.
-
+To use `zigrc`, import the `src/root.zig` file into your project, or add it as a module by running command shown below in your project directory.
+```console
+zig fetch "https://github.com/Aandreba/zigrc/archive/refs/tags/0.4.0.tar.gz" --save=zigrc
+```
+Then import it in your build file (`build.zig`):
+```zig
+pub fn build(b: *std.Build) void {
+// ...
+    const zigrc_dep = b.dependency("zigrc", .{});
+    const zigrc_mod = &zigrc_dep.artifact("zig-rc").root_module;
+    exe.root_module.addImport("zigrc", zigrc_mod);
+    lib.root_module.addImport("zigrc", zigrc_mod);
+    exe_unit_tests.root_module.addImport("zigrc", zigrc_mod);
+    lib_unit_tests.root_module.addImport("zigrc", zigrc_mod);
+// ...
+}
+```
 ## Example
 
 ```zig
