@@ -83,12 +83,11 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
             return self.asUnmanaged().release(self.alloc);
         }
 
-        /// Decrements the reference count, deallocating the weak count reaches zero,
-        /// and executing `f` if the strong count reaches zero.
-        /// The `f` function has a signature of `fn(*T, ...args)` or `fn(T, ...args)`.
-        /// The continued use of the pointer after calling `release` is undefined behaviour.
-        pub fn releaseWithFn(self: Self, comptime f: anytype, args: anytype) void {
-            return self.asUnmanaged().releaseWithFn(self.alloc, f, args);
+        /// Decrements the reference count, deallocating if the weak count reaches zero,
+        /// and returning the underlying value if the strong count reaches zero.
+        /// The continued use of the pointer after calling this method is undefined behaviour.
+        pub fn releaseUnwrap(self: Self) ?T {
+            return self.asUnmanaged().releaseUnwrap(self.alloc);
         }
 
         /// Returns the inner value, if the `Rc` has exactly one strong reference.
@@ -97,6 +96,11 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
         /// The continued use of the pointer if the method successfully returns `T` is undefined behaviour.
         pub fn tryUnwrap(self: Self) ?T {
             return self.asUnmanaged().tryUnwrap(self.alloc);
+        }
+
+        /// DEPRECATED: Use `releaseUnwrap` instead. Will be removed in the next major release.
+        pub fn releaseWithFn(self: Self, comptime f: anytype, args: anytype) void {
+            self.asUnmanaged().releaseWithFn(self.alloc, f, args);
         }
 
         /// Total size (in bytes) of the reference counted value on the heap.
@@ -289,12 +293,16 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
             return self.asUnmanaged().release(self.alloc);
         }
 
-        /// Decrements the reference count, deallocating the weak count reaches zero,
-        /// and executing `f` if the strong count reaches zero.
-        /// The `f` function has a signature of `fn(*T, ...args)` or `fn(T, ...args)`.
-        /// The continued use of the pointer after calling `release` is undefined behaviour.
+        /// Decrements the reference count, deallocating if the weak count reaches zero,
+        /// and returning the underlying value if the strong count reaches zero.
+        /// The continued use of the pointer after calling this method is undefined behaviour.
+        pub fn releaseUnwrap(self: Self) ?T {
+            return self.asUnmanaged().releaseUnwrap(self.alloc);
+        }
+
+        /// DEPRECATED: Use `releaseUnwrap` instead. Will be removed in the next major release.
         pub fn releaseWithFn(self: Self, comptime f: anytype, args: anytype) void {
-            return self.asUnmanaged().releaseWithFn(self.alloc, f, args);
+            self.asUnmanaged().releaseWithFn(self.alloc, f, args);
         }
 
         /// Returns the inner value, if the `Arc` has exactly one strong reference.
@@ -517,26 +525,28 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
             }
         }
 
-        /// Decrements the reference count, deallocating the weak count reaches zero,
-        /// and executing `f` if the strong count reaches zero.
-        /// The `f` function has a signature of `fn(*T, ...args)` or `fn(T, ...args)`.
-        /// The continued use of the pointer after calling `release` is undefined behaviour.
-        pub fn releaseWithFn(self: Self, allocator: Allocator, comptime f: anytype, args: anytype) void {
+        /// Decrements the reference count, deallocating if the weak count reaches zero,
+        /// and returning the underlying value if the strong count reaches zero.
+        /// The continued use of the pointer after calling this method is undefined behaviour.
+        pub fn releaseUnwrap(self: Self, allocator: Allocator) ?T {
             const ptr = self.innerPtr();
 
             ptr.strong -= 1;
             if (ptr.strong == 0) {
-                if (comptime @typeInfo(@TypeOf(f)).Fn.params[0].type == T) {
-                    @call(.auto, f, .{self.value.*} ++ args);
-                } else {
-                    @call(.auto, f, .{self.value} ++ args);
-                }
-
+                const value = self.value.*;
                 ptr.weak -= 1;
                 if (ptr.weak == 0) {
                     allocator.destroy(ptr);
                 }
+                return value;
             }
+
+            return null;
+        }
+
+        /// DEPRECATED: Use `releaseUnwrap` instead. Will be removed in the next major release.
+        pub fn releaseWithFn(_: Self, _: Allocator, comptime _: anytype, _: anytype) void {
+            @compileError("DEPRECATED: Use `releaseUnwrap` instead. Will be removed in the next major release.");
         }
 
         /// Returns the inner value, if the `Rc` has exactly one strong reference.
@@ -757,7 +767,6 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
         /// The continued use of the pointer after calling `release` is undefined behaviour.
         pub fn release(self: Self, allocator: Allocator) void {
             const ptr = self.innerPtr();
-
             if (@atomicRmw(usize, &ptr.strong, .Sub, 1, .acq_rel) == 1) {
                 if (@atomicRmw(usize, &ptr.weak, .Sub, 1, .acq_rel) == 1) {
                     allocator.destroy(ptr);
@@ -765,24 +774,24 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
             }
         }
 
-        /// Decrements the reference count, deallocating the weak count reaches zero,
-        /// and executing `f` if the strong count reaches zero.
-        /// The `f` function has a signature of `fn(*T, ...args)` or `fn(T, ...args)`.
-        /// The continued use of the pointer after calling `release` is undefined behaviour.
-        pub fn releaseWithFn(self: Self, allocator: Allocator, comptime f: anytype, args: anytype) void {
+        /// Decrements the reference count, deallocating if the weak count reaches zero,
+        /// and returning the underlying value if the strong count reaches zero.
+        /// The continued use of the pointer after calling this method is undefined behaviour.
+        pub fn releaseUnwrap(self: Self, allocator: Allocator) ?T {
             const ptr = self.innerPtr();
-
             if (@atomicRmw(usize, &ptr.strong, .Sub, 1, .acq_rel) == 1) {
-                if (comptime @typeInfo(@TypeOf(f)).Fn.params[0].type == T) {
-                    @call(.auto, f, .{self.value.*} ++ args);
-                } else {
-                    @call(.auto, f, .{self.value} ++ args);
-                }
-
+                const value = self.value.*;
                 if (@atomicRmw(usize, &ptr.weak, .Sub, 1, .acq_rel) == 1) {
                     allocator.destroy(ptr);
                 }
+                return value;
             }
+            return null;
+        }
+
+        /// DEPRECATED: Use `releaseUnwrap` instead. Will be removed in the next major release.
+        pub fn releaseWithFn(_: Self, _: Allocator, comptime _: anytype, _: anytype) void {
+            @compileError("DEPRECATED: Use `releaseUnwrap` instead. Will be removed in the next major release.");
         }
 
         /// Returns the inner value, if the `Arc` has exactly one strong reference.

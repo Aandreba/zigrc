@@ -82,7 +82,7 @@ test "cyclic" {
     };
 
     var gadget = try Gadget.init(alloc);
-    defer gadget.releaseWithFn(Gadget.deinit, .{});
+    defer if (gadget.releaseUnwrap()) |val| val.deinit();
 
     try expect(gadget.strongCount() == 1);
     try expect(gadget.weakCount() == 1);
@@ -166,7 +166,7 @@ test "cyclic atomic" {
     };
 
     var gadget = try Gadget.init(alloc);
-    defer gadget.releaseWithFn(Gadget.deinit, .{});
+    defer if (gadget.releaseUnwrap()) |val| val.deinit();
 
     try expect(gadget.strongCount() == 1);
     try expect(gadget.weakCount() == 1);
