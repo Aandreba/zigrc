@@ -1,4 +1,5 @@
 coverage: clean
+    rm -rf kcov-out
     zig build test -Doptimize=Debug
     kcov --include-pattern=src/root.zig,src/tests.zig kcov-out zig-cache/o/**/test
 
