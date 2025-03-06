@@ -16,12 +16,13 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
     }
 
     return struct {
-        value: if (alignment) |a| *align(a) T else *T,
+        value: *align(internal_alignment) T,
         alloc: Allocator,
 
         const Self = @This();
         const Unmanaged = RcAlignedUnmanaged(T, alignment);
-        const Inner = Unmanaged.Inner;
+        pub const internal_alignment = Unmanaged.internal_alignment;
+        pub const total_size = Unmanaged.total_size;
 
         /// Creates a new reference-counted value.
         pub fn init(alloc: Allocator, t: T) Allocator.Error!Self {
@@ -35,25 +36,22 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
         /// to allow you to construct a `T` which holds a weak pointer to itself.
         /// `data_fn` has the signature `fn(*Weak, ...data_args) T`
         pub fn initCyclic(alloc: Allocator, comptime data_fn: anytype, data_args: anytype) Allocator.Error!Self {
-            const inner = try alloc.create(Inner);
-            inner.* = Inner{ .strong = 0, .weak = 1, .value = undefined };
-
+            const inner = try Unmanaged.create(alloc);
+            Unmanaged.ptrToStrong(inner).* = 0;
+            Unmanaged.ptrToWeak(inner).* = 1;
             // Strong references should collectively own a shared weak reference,
             // so don't run the destructor for our old weak reference.
-            var weak = Weak{ .inner = inner, .alloc = alloc };
-
+            var weak_ptr = Weak{ .inner = Unmanaged.Weak.fromValuePtr(inner), .alloc = alloc };
             // It's important we don't give up ownership of the weak pointer, or
             // else the memory might be freed by the time `data_fn` returns. If
             // we really wanted to pass ownership, we could create an additional
             // weak pointer for ourselves, but this would result in additional
             // updates to the weak reference count which might not be necessary
             // otherwise.
-            inner.value = @call(.auto, data_fn, .{&weak} ++ data_args);
-
-            std.debug.assert(inner.strong == 0);
-            inner.strong = 1;
-
-            return Self{ .value = &inner.value, .alloc = alloc };
+            inner.value = @call(.auto, data_fn, .{&weak_ptr} ++ data_args);
+            std.debug.assert(Unmanaged.ptrToStrong(inner).* == 0);
+            Unmanaged.ptrToStrong.* = 1;
+            return Self{ .value = inner, .alloc = alloc };
         }
 
         /// Gets the number of strong references to this value.
@@ -103,29 +101,13 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
             self.asUnmanaged().releaseWithFn(self.alloc, f, args);
         }
 
-        /// Total size (in bytes) of the reference counted value on the heap.
-        /// This value accounts for the extra memory required to count the references.
-        pub fn innerSize() comptime_int {
-            return Inner.innerSize();
-        }
-
-        /// Alignment (in bytes) of the reference counted value on the heap.
-        /// This value accounts for the extra memory required to count the references.
-        pub fn innerAlign() comptime_int {
-            return Inner.innerAlign();
-        }
-
         inline fn asUnmanaged(self: Self) Unmanaged {
             return .{ .value = self.value };
         }
 
-        inline fn innerPtr(self: Self) *Inner {
-            return @alignCast(@fieldParentPtr("value", self.value));
-        }
-
         /// A single threaded, weak reference to a reference-counted value.
         pub const Weak = struct {
-            inner: ?*Inner = null,
+            inner: WeakUnmanaged = null,
             alloc: Allocator,
 
             const WeakUnmanaged = Unmanaged.Weak;
@@ -133,7 +115,7 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
             /// Creates a new weak reference.
             pub fn init(parent: RcAligned(T, alignment)) Weak {
                 return Weak{
-                    .inner = WeakUnmanaged.init(parent.asUnmanaged()).inner,
+                    .inner = WeakUnmanaged.init(parent.asUnmanaged()),
                     .alloc = parent.alloc,
                 };
             }
@@ -393,7 +375,6 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
     }
 
     return struct {
-        /// True alignment of the value stored in the heap. This value cannot be smaller than `alignment`
         value: *align(internal_alignment) T,
 
         const Self = @This();
@@ -407,49 +388,48 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
 
         /// Creates a new reference-counted value.
         pub fn init(alloc: Allocator, t: T) Allocator.Error!Self {
-            const inner = try alloc.create(Inner);
-            inner.* = Inner{ .strong = 1, .weak = 1, .value = t };
-            return Self{ .value = &inner.value };
+            const inner = try create(alloc);
+            inner.* = t;
+            ptrToStrong(inner).* = 1;
+            ptrToWeak(inner).* = 1;
+            return Self{ .value = inner };
         }
 
         /// Constructs a new `Rc` while giving you a `Weak` to the allocation,
         /// to allow you to construct a `T` which holds a weak pointer to itself.
         /// `data_fn` has the signature `fn(*Weak, ...data_args) T`
         pub fn initCyclic(alloc: Allocator, comptime data_fn: anytype, data_args: anytype) Allocator.Error!Self {
-            const inner = try alloc.create(Inner);
-            inner.* = Inner{ .strong = 0, .weak = 1, .value = undefined };
-
+            const inner = try create(alloc);
+            ptrToStrong(inner).* = 0;
+            ptrToWeak(inner).* = 1;
             // Strong references should collectively own a shared weak reference,
             // so don't run the destructor for our old weak reference.
-            var weak = Weak{ .inner = inner, .alloc = alloc };
-
+            var weak_ptr = Weak.fromValuePtr(inner);
             // It's important we don't give up ownership of the weak pointer, or
             // else the memory might be freed by the time `data_fn` returns. If
             // we really wanted to pass ownership, we could create an additional
             // weak pointer for ourselves, but this would result in additional
             // updates to the weak reference count which might not be necessary
             // otherwise.
-            inner.value = @call(.auto, data_fn, .{&weak} ++ data_args);
-
-            std.debug.assert(inner.strong == 0);
-            inner.strong = 1;
-
+            inner.value = @call(.auto, data_fn, .{&weak_ptr} ++ data_args);
+            std.debug.assert(ptrToStrong(inner).* == 0);
+            ptrToStrong(inner).* = 1;
             return Self{ .value = &inner.value, .alloc = alloc };
         }
 
         /// Gets the number of strong references to this value.
         pub fn strongCount(self: Self) usize {
-            return self.innerPtr().strong;
+            return self.strong().*;
         }
 
         /// Gets the number of weak references to this value.
         pub fn weakCount(self: Self) usize {
-            return self.innerPtr().weak - 1;
+            return self.weak().* - 1;
         }
 
         /// Increments the strong count.
         pub fn retain(self: Self) Self {
-            self.innerPtr().strong += 1;
+            self.strong().* += 1;
             return self;
         }
 
@@ -461,13 +441,11 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
         /// Decrements the reference count, deallocating if the weak count reaches zero.
         /// The continued use of the pointer after calling `release` is undefined behaviour.
         pub fn release(self: Self, allocator: Allocator) void {
-            const ptr = self.innerPtr();
-
-            ptr.strong -= 1;
-            if (ptr.strong == 0) {
-                ptr.weak -= 1;
-                if (ptr.weak == 0) {
-                    allocator.destroy(ptr);
+            self.strong().* -= 1;
+            if (self.strong().* == 0) {
+                self.weak().* -= 1;
+                if (self.weak().* == 0) {
+                    destroy(allocator, self.value);
                 }
             }
         }
@@ -476,18 +454,15 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
         /// and returning the underlying value if the strong count reaches zero.
         /// The continued use of the pointer after calling this method is undefined behaviour.
         pub fn releaseUnwrap(self: Self, allocator: Allocator) ?T {
-            const ptr = self.innerPtr();
-
-            ptr.strong -= 1;
-            if (ptr.strong == 0) {
+            self.strong().* -= 1;
+            if (self.strong().* == 0) {
                 const value = self.value.*;
-                ptr.weak -= 1;
-                if (ptr.weak == 0) {
-                    allocator.destroy(ptr);
+                self.weak().* -= 1;
+                if (self.weak().* == 0) {
+                    destroy(allocator, self.value);
                 }
                 return value;
             }
-
             return null;
         }
 
@@ -501,21 +476,24 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
         /// This will succeed even if there are outstanding weak references.
         /// The continued use of the pointer if the method successfully returns `T` is undefined behaviour.
         pub fn tryUnwrap(self: Self, allocator: Allocator) ?T {
-            const ptr = self.innerPtr();
-
-            if (ptr.strong == 1) {
-                ptr.strong = 0;
+            if (self.strong().* == 1) {
+                self.strong().* = 0;
                 const tmp = self.value.*;
-
-                ptr.weak -= 1;
-                if (ptr.weak == 0) {
-                    allocator.destroy(ptr);
+                self.weak().* -= 1;
+                if (self.weak().* == 0) {
+                    destroy(allocator, self.value);
                 }
-
                 return tmp;
             }
-
             return null;
+        }
+
+        inline fn strong(self: Self) *usize {
+            return ptrToStrong(self.value);
+        }
+
+        inline fn weak(self: Self) *usize {
+            return ptrToWeak(self.value);
         }
 
         inline fn create(allocator: Allocator) std.mem.Allocator.Error!*align(internal_alignment) T {
@@ -538,40 +516,39 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
 
         /// A single threaded, weak reference to a reference-counted value.
         pub const Weak = struct {
-            inner: ?*Inner = null,
+            inner: ?*align(internal_alignment) anyopaque = null,
 
             /// Creates a new weak reference.
             pub fn init(parent: RcAlignedUnmanaged(T, alignment)) Weak {
-                const ptr = parent.innerPtr();
-                ptr.weak += 1;
-                return Weak{ .inner = ptr };
+                parent.weak().* += 1;
+                return Weak{ .inner = @ptrCast(parent.value) };
             }
 
             /// Creates a new weak reference object from a pointer to it's underlying value,
             /// without increasing the weak count.
-            pub fn fromValuePtr(value: *T) Weak {
-                return .{ .inner = @fieldParentPtr("value", value) };
+            pub fn fromValuePtr(value_ptr: *align(internal_alignment) T) Weak {
+                return .{ .inner = value_ptr };
             }
 
             /// Gets the number of strong references to this value.
             pub fn strongCount(self: Weak) usize {
-                return (self.innerPtr() orelse return 0).strong;
+                return (self.strong() orelse return 0).*;
             }
 
             /// Gets the number of weak references to this value.
             pub fn weakCount(self: Weak) usize {
-                const ptr = self.innerPtr() orelse return 1;
-                if (ptr.strong == 0) {
-                    return ptr.weak;
+                const ptr = self.value() orelse return 1;
+                if (ptrToStrong(ptr).* == 0) {
+                    return ptrToWeak(ptr).*;
                 } else {
-                    return ptr.weak - 1;
+                    return ptrToWeak(ptr).* - 1;
                 }
             }
 
             /// Increments the weak count.
             pub fn retain(self: Weak) Weak {
-                if (self.innerPtr()) |ptr| {
-                    ptr.weak += 1;
+                if (self.weak()) |ptr| {
+                    ptr.* += 1;
                 }
                 return self;
             }
@@ -580,50 +557,44 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
             ///
             /// Returns `null` if the inner value has since been dropped.
             pub fn upgrade(self: *Weak, allocator: Allocator) ?RcAlignedUnmanaged(T, alignment) {
-                const ptr = self.innerPtr() orelse return null;
+                const ptr = self.value() orelse return null;
 
-                if (ptr.strong == 0) {
-                    ptr.weak -= 1;
-                    if (ptr.weak == 0) {
-                        allocator.destroy(ptr);
+                if (ptrToStrong(ptr).* == 0) {
+                    ptrToWeak(ptr).* -= 1;
+                    if (ptrToWeak(ptr).* == 0) {
+                        destroy(allocator, ptr);
                         self.inner = null;
                     }
                     return null;
                 }
 
-                ptr.strong += 1;
+                ptrToStrong(ptr).* += 1;
                 return RcAlignedUnmanaged(T, alignment){
-                    .value = &ptr.value,
+                    .value = ptr,
                 };
             }
 
             /// Decrements the weak reference count, deallocating if it reaches zero.
             /// The continued use of the pointer after calling `release` is undefined behaviour.
             pub fn release(self: Weak, allocator: Allocator) void {
-                if (self.innerPtr()) |ptr| {
-                    ptr.weak -= 1;
-                    if (ptr.weak == 0) {
-                        allocator.destroy(ptr);
+                if (self.value()) |ptr| {
+                    ptrToWeak(ptr).* -= 1;
+                    if (ptrToWeak(ptr).* == 0) {
+                        destroy(allocator, ptr);
                     }
                 }
             }
 
-            /// Total size (in bytes) of the reference counted value on the heap.
-            /// This value accounts for the extra memory required to count the references,
-            /// and is valid for single and multi-threaded refrence counters.
-            pub fn innerSize() comptime_int {
-                return Inner.innerSize();
+            inline fn value(self: Weak) ?*align(internal_alignment) T {
+                return @ptrCast(self.inner);
             }
 
-            /// Alignment (in bytes) of the reference counted value on the heap.
-            /// This value accounts for the extra memory required to count the references,
-            /// and is valid for single and multi-threaded refrence counters.
-            pub fn innerAlign() comptime_int {
-                return Inner.innerAlign();
+            inline fn strong(self: Weak) ?*usize {
+                return ptrToStrong(@ptrCast(self.inner orelse return null));
             }
 
-            inline fn innerPtr(self: Weak) ?*Inner {
-                return @as(?*Inner, @ptrCast(self.inner));
+            inline fn weak(self: Weak) ?*usize {
+                return ptrToWeak(@ptrCast(self.inner orelse return null));
             }
         };
     };

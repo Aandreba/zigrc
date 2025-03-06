@@ -21,10 +21,10 @@ const Data = struct {
 test "example" {
     std.debug.print("\n", .{});
     std.debug.print("Data size: {}\n", .{@sizeOf(Data)});
-    std.debug.print("Heap size: {}\n\n", .{Arc.innerSize()});
+    std.debug.print("Heap size: {}\n\n", .{Arc.total_size});
 
     std.debug.print("Data align: {}\n", .{@alignOf(Data)});
-    std.debug.print("Heap align: {}\n\n", .{Arc.innerAlign()});
+    std.debug.print("Heap align: {}\n\n", .{Arc.internal_alignment});
 
     var value = try Arc.init(std.testing.allocator, .{});
     errdefer if (value.releaseUnwrap()) |inner| inner.deinit();
