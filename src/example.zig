@@ -27,13 +27,13 @@ test "example" {
     std.debug.print("Heap align: {}\n\n", .{Arc.innerAlign()});
 
     var value = try Arc.init(std.testing.allocator, .{});
-    errdefer value.releaseWithFn(Data.deinit, .{});
+    errdefer if (value.releaseUnwrap()) |inner| inner.deinit();
 
     var handles: [THREADS]Thread = undefined;
     var i: usize = 0;
     while (i < THREADS) {
         const this_value = value.retain();
-        errdefer this_value.releaseWithFn(Data.deinit, .{});
+        errdefer if (this_value.releaseUnwrap()) |data| data.deinit();
         handles[i] = try Thread.spawn(.{}, thread_exec, .{this_value});
         i += 1;
     }
@@ -46,13 +46,12 @@ test "example" {
 }
 
 fn thread_exec(data: Arc) !void {
-    defer data.releaseWithFn(Data.deinit, .{});
+    defer if (data.releaseUnwrap()) |inner| inner.deinit();
 
-    var rng = std.rand.DefaultPrng.init(@as(u64, @bitCast(@as(i64, @truncate(std.time.nanoTimestamp())))));
+    var rng = std.Random.DefaultPrng.init(@as(u64, @bitCast(@as(i64, @truncate(std.time.nanoTimestamp())))));
 
     data.value.mutex.lock();
     defer data.value.mutex.unlock();
-
     const value = rng.random().int(u64);
     try data.value.data.append(value);
 
