@@ -444,10 +444,11 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
         value: if (alignment) |a| *align(a) T else *T,
 
         const Self = @This();
-        const Inner = struct {
-            strong: usize,
-            weak: usize,
+        const Inner = extern struct {
             value: T align(alignment orelse @alignOf(T)),
+            // Align to the cache-line boundry to avoid writes to the value or counts invalidating the cache of the other
+            strong: usize align(std.atomic.cache_line),
+            weak: usize,
 
             fn innerSize() comptime_int {
                 return @sizeOf(@This());
@@ -698,10 +699,10 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
         value: if (alignment) |a| *align(a) T else *T,
 
         const Self = @This();
-        const Inner = struct {
-            strong: usize align(std.atomic.cache_line),
-            weak: usize align(std.atomic.cache_line),
+        const Inner = extern struct {
             value: T align(alignment orelse @alignOf(T)),
+            strong: usize align(std.atomic.cache_line),
+            weak: usize,
 
             fn innerSize() comptime_int {
                 return @sizeOf(@This());
