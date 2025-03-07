@@ -12,5 +12,5 @@ test:
     zig test src/tests.zig
 
 clean:
-    rm -rf zig-cache
+    rm -rf .zig-cache
     rm -rf zig-out

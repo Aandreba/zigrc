@@ -48,9 +48,9 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
             // weak pointer for ourselves, but this would result in additional
             // updates to the weak reference count which might not be necessary
             // otherwise.
-            inner.value = @call(.auto, data_fn, .{&weak_ptr} ++ data_args);
+            inner.* = @call(.auto, data_fn, .{&weak_ptr} ++ data_args);
             std.debug.assert(Unmanaged.ptrToStrong(inner).* == 0);
-            Unmanaged.ptrToStrong.* = 1;
+            Unmanaged.ptrToStrong(inner).* = 1;
             return Self{ .value = inner, .alloc = alloc };
         }
 
@@ -107,7 +107,7 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
 
         /// A single threaded, weak reference to a reference-counted value.
         pub const Weak = struct {
-            inner: WeakUnmanaged = null,
+            inner: WeakUnmanaged = .{},
             alloc: Allocator,
 
             const WeakUnmanaged = Unmanaged.Weak;
@@ -122,23 +122,23 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
 
             /// Creates a new weak reference object from a pointer to it's underlying value,
             /// without increasing the weak count.
-            pub fn fromValuePtr(value: if (alignment) |a| *align(a) T else *T) Weak {
-                return .{ .inner = @alignCast(@fieldParentPtr("value", value)) };
+            pub fn fromValuePtr(value: *align(internal_alignment) T) Weak {
+                return .{ .inner = @ptrCast(value) };
             }
 
             /// Gets the number of strong references to this value.
             pub fn strongCount(self: Weak) usize {
-                return self.asUnmanaged().strongCount();
+                return self.inner.strongCount();
             }
 
             /// Gets the number of weak references to this value.
             pub fn weakCount(self: Weak) usize {
-                return self.asUnmanaged().weakCount();
+                return self.inner.weakCount();
             }
 
             /// Increments the weak count.
             pub fn retain(self: Weak) Weak {
-                _ = self.asUnmanaged().retain();
+                _ = self.inner.retain();
                 return self;
             }
 
@@ -146,50 +146,17 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
             ///
             /// Returns `null` if the inner value has since been dropped.
             pub fn upgrade(self: *Weak) ?RcAligned(T, alignment) {
-                const ptr = self.innerPtr() orelse return null;
-
-                if (ptr.strong == 0) {
-                    ptr.weak -= 1;
-                    if (ptr.weak == 0) {
-                        self.alloc.destroy(ptr);
-                        self.inner = null;
-                    }
-                    return null;
-                }
-
-                ptr.strong += 1;
-                return .{
-                    .value = &ptr.value,
+                if (self.inner.upgrade(self.alloc)) |ptr| return RcAligned(T, alignment){
+                    .value = ptr.value,
                     .alloc = self.alloc,
                 };
+                return null;
             }
 
             /// Decrements the weak reference count, deallocating if it reaches zero.
             /// The continued use of the pointer after calling `release` is undefined behaviour.
             pub fn release(self: Weak) void {
-                return self.asUnmanaged().release(self.alloc);
-            }
-
-            /// Total size (in bytes) of the reference counted value on the heap.
-            /// This value accounts for the extra memory required to count the references,
-            /// and is valid for single and multi-threaded refrence counters.
-            pub fn innerSize() comptime_int {
-                return Inner.innerSize();
-            }
-
-            /// Alignment (in bytes) of the reference counted value on the heap.
-            /// This value accounts for the extra memory required to count the references,
-            /// and is valid for single and multi-threaded refrence counters.
-            pub fn innerAlign() comptime_int {
-                return Inner.innerAlign();
-            }
-
-            inline fn asUnmanaged(self: Weak) WeakUnmanaged {
-                return .{ .inner = self.inner };
-            }
-
-            inline fn innerPtr(self: Weak) ?*Inner {
-                return @as(?*Inner, @ptrCast(self.inner));
+                return self.inner.release(self.alloc);
             }
         };
     };
@@ -244,10 +211,10 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
             // weak pointer for ourselves, but this would result in additional
             // updates to the weak reference count which might not be necessary
             // otherwise.
-            inner.value = @call(.auto, data_fn, .{&weak_ptr} ++ data_args);
+            inner.* = @call(.auto, data_fn, .{&weak_ptr} ++ data_args);
 
             std.debug.assert(@atomicRmw(usize, Unmanaged.ptrToStrong(inner), .Add, 1, .release) == 0);
-            return Self{ .value = inner };
+            return Self{ .value = inner, .alloc = alloc };
         }
 
         /// Gets the number of strong references to this value.
@@ -311,7 +278,7 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
             /// Creates a new weak reference.
             pub fn init(parent: ArcAligned(T, alignment)) Weak {
                 return Weak{
-                    .inner = UnmanagedWeak.init(parent.asUnmanaged()).inner,
+                    .inner = UnmanagedWeak.init(parent.asUnmanaged()),
                     .alloc = parent.alloc,
                 };
             }
@@ -324,17 +291,17 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
 
             /// Gets the number of strong references to this value.
             pub fn strongCount(self: Weak) usize {
-                return self.asUnmanaged().strongCount();
+                return self.inner.strongCount();
             }
 
             /// Gets the number of weak references to this value.
             pub fn weakCount(self: Weak) usize {
-                return self.asUnmanaged().weakCount();
+                return self.inner.weakCount();
             }
 
             /// Increments the weak count.
             pub fn retain(self: Weak) Weak {
-                _ = self.asUnmanaged().retain();
+                _ = self.inner.retain();
                 return self;
             }
 
@@ -342,7 +309,7 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
             ///
             /// Returns `null` if the inner value has since been dropped.
             pub fn upgrade(self: *Weak) ?ArcAligned(T, alignment) {
-                if (self.asUnmanaged().upgrade(self.alloc)) |strong_ref| {
+                if (self.inner.upgrade(self.alloc)) |strong_ref| {
                     return ArcAligned(T, alignment){ .value = strong_ref.value, .alloc = self.alloc };
                 }
                 return null;
@@ -351,11 +318,7 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
             /// Decrements the weak reference count, deallocating if it reaches zero.
             /// The continued use of the pointer after calling `release` is undefined behaviour.
             pub fn release(self: Weak) void {
-                return self.asUnmanaged().release(self.alloc);
-            }
-
-            inline fn asUnmanaged(self: Weak) UnmanagedWeak {
-                return .{ .inner = self.inner };
+                return self.inner.release(self.alloc);
             }
         };
     };
@@ -786,16 +749,14 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
                     const prev = @atomicLoad(usize, ptrToStrong(ptr), .acquire);
                     if (prev == 0) {
                         if (@atomicRmw(usize, ptrToWeak(ptr), .Sub, 1, .acq_rel) == 1) {
-                            allocator.destroy(ptr);
+                            destroy(allocator, ptr);
                             self.inner = null;
                         }
                         return null;
                     }
 
                     if (@cmpxchgStrong(usize, ptrToStrong(ptr), prev, prev + 1, .acquire, .monotonic) == null) {
-                        return ArcAlignedUnmanaged(T, alignment){
-                            .value = &ptr.value,
-                        };
+                        return ArcAlignedUnmanaged(T, alignment){ .value = ptr };
                     }
 
                     std.atomic.spinLoopHint();
