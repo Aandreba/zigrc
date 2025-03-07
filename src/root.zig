@@ -90,11 +90,6 @@ pub fn RcAligned(comptime T: type, comptime alignment: u29) type {
             return self.asUnmanaged().tryUnwrap(self.alloc);
         }
 
-        /// DEPRECATED: Use `releaseUnwrap` instead. Will be removed in the next major release.
-        pub fn releaseWithFn(self: Self, comptime f: anytype, args: anytype) void {
-            self.asUnmanaged().releaseWithFn(self.alloc, f, args);
-        }
-
         inline fn asUnmanaged(self: Self) Unmanaged {
             return .{ .value = self.value };
         }
@@ -237,11 +232,6 @@ pub fn ArcAligned(comptime T: type, comptime alignment: u29) type {
         /// The continued use of the pointer after calling this method is undefined behaviour.
         pub fn releaseUnwrap(self: Self) ?T {
             return self.asUnmanaged().releaseUnwrap(self.alloc);
-        }
-
-        /// DEPRECATED: Use `releaseUnwrap` instead. Will be removed in the next major release.
-        pub fn releaseWithFn(self: Self, comptime f: anytype, args: anytype) void {
-            self.asUnmanaged().releaseWithFn(self.alloc, f, args);
         }
 
         /// Returns the inner value, if the `Arc` has exactly one strong reference.
@@ -408,11 +398,6 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
                 return value;
             }
             return null;
-        }
-
-        /// DEPRECATED: Use `releaseUnwrap` instead. Will be removed in the next major release.
-        pub fn releaseWithFn(_: Self, _: Allocator, comptime _: anytype, _: anytype) void {
-            @compileError("DEPRECATED: Use `releaseUnwrap` instead. Will be removed in the next major release.");
         }
 
         /// Returns the inner value, if the `Rc` has exactly one strong reference.
@@ -642,11 +627,6 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
                 return value;
             }
             return null;
-        }
-
-        /// DEPRECATED: Use `releaseUnwrap` instead. Will be removed in the next major release.
-        pub fn releaseWithFn(_: Self, _: Allocator, comptime _: anytype, _: anytype) void {
-            @compileError("DEPRECATED: Use `releaseUnwrap` instead. Will be removed in the next major release.");
         }
 
         /// Returns the inner value, if the `Arc` has exactly one strong reference.
