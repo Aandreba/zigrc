@@ -4,17 +4,11 @@ const Allocator = std.mem.Allocator;
 
 /// A single threaded, strong reference to a reference-counted value.
 pub fn Rc(comptime T: type) type {
-    return RcAligned(T, null);
+    return RcAligned(T, @alignOf(T));
 }
 
 /// A single threaded, strong reference to a reference-counted value.
-pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
-    if (alignment) |a| {
-        if (a == @alignOf(T)) {
-            return RcAligned(T, null);
-        }
-    }
-
+pub fn RcAligned(comptime T: type, comptime alignment: u29) type {
     return struct {
         value: *align(internal_alignment) T,
         alloc: Allocator,
@@ -164,18 +158,12 @@ pub fn RcAligned(comptime T: type, comptime alignment: ?u29) type {
 
 /// A multi-threaded, strong reference to a reference-counted value.
 pub fn Arc(comptime T: type) type {
-    return ArcAligned(T, null);
+    return ArcAligned(T, @alignOf(T));
 }
 
 /// A multi-threaded, strong reference to a reference-counted value.
-pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
+pub fn ArcAligned(comptime T: type, comptime alignment: u29) type {
     if (builtin.single_threaded) return RcAligned(T, alignment);
-    if (alignment) |a| {
-        if (a == @alignOf(T)) {
-            return ArcAligned(T, null);
-        }
-    }
-
     return struct {
         value: *align(internal_alignment) T,
         alloc: Allocator,
@@ -326,24 +314,17 @@ pub fn ArcAligned(comptime T: type, comptime alignment: ?u29) type {
 
 /// A single threaded, strong reference to a reference-counted value.
 pub fn RcUnmanaged(comptime T: type) type {
-    return RcAlignedUnmanaged(T, null);
+    return RcAlignedUnmanaged(T, @alignOf(T));
 }
 
 /// A single threaded, strong reference to a reference-counted value.
-pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
-    if (alignment) |a| {
-        if (a == @alignOf(T)) {
-            return RcAlignedUnmanaged(T, null);
-        }
-    }
-
+pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
     return struct {
         value: *align(internal_alignment) T,
 
         const Self = @This();
-        /// The true alignment of the value stored on the heap, currently just the provided 'alignment', but may change in the future.
-        /// This value will never be lower than the provided 'alignment'.
-        pub const internal_alignment = alignment orelse @alignOf(T);
+        /// The true alignment of the value stored on the heap. This value will never be lower than the provided 'alignment'.
+        pub const internal_alignment = @max(alignment, @alignOf(usize));
         /// Offset from the value to the reference counters.
         const counter_offset = std.mem.alignForward(usize, @sizeOf(T), @alignOf(usize));
         /// Since we'll never put this value into an array, there is no need to add alignment padding at the end.
@@ -565,25 +546,18 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
 
 /// A multi-threaded, strong reference to a reference-counted value.
 pub fn ArcUnmanaged(comptime T: type) type {
-    return ArcAlignedUnmanaged(T, null);
+    return ArcAlignedUnmanaged(T, @alignOf(T));
 }
 
 /// A multi-threaded, strong reference to a reference-counted value.
-pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: ?u29) type {
+pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
     if (builtin.single_threaded) return RcAlignedUnmanaged(T, alignment);
-    if (alignment) |a| {
-        if (a == @alignOf(T)) {
-            return ArcAlignedUnmanaged(T, null);
-        }
-    }
-
     return struct {
         value: *align(internal_alignment) T,
 
         const Self = @This();
-        /// The true alignment of the value stored on the heap, currently just the provided 'alignment', but may change in the future.
-        /// This value will never be lower than the provided 'alignment'.
-        pub const internal_alignment = alignment orelse @alignOf(T);
+        /// The true alignment of the value stored on the heap. This value will never be lower than the provided 'alignment'.
+        pub const internal_alignment = @max(alignment, @max(@alignOf(usize), std.atomic.cache_line));
         /// Offset from the value to the reference counters.
         const counter_offset = std.mem.alignForward(usize, @sizeOf(T), @max(@alignOf(usize), std.atomic.cache_line));
         /// Since we'll never put this value into an array, there is no need to add alignment padding at the end,

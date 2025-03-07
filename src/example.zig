@@ -6,6 +6,7 @@ const Mutex = Thread.Mutex;
 
 const ArrayList = std.ArrayList;
 const Arc = rc.Arc(Data);
+const Rc = rc.Rc(@Vector(8, f32));
 
 const THREADS = 8;
 
@@ -43,6 +44,15 @@ test "example" {
     defer owned_value.deinit();
 
     std.debug.print("{d}\n", .{owned_value.data.items});
+}
+
+test "st_example" {
+    std.debug.print("\n", .{});
+    std.debug.print("Data size: {}\n", .{@sizeOf(@Vector(8, f32))});
+    std.debug.print("Heap size: {}\n\n", .{Rc.total_size});
+
+    std.debug.print("Data align: {}\n", .{@alignOf(@Vector(8, f32))});
+    std.debug.print("Heap align: {}\n\n", .{Rc.internal_alignment});
 }
 
 fn thread_exec(data: Arc) !void {

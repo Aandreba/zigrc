@@ -57,10 +57,10 @@ test "weak" {
 
 test "cyclic" {
     const Gadget = struct {
-        _me: Weak,
+        _me: rc.Rc(@This()).Weak,
 
         const Self = @This();
-        const Rc = rc.Rc(Self);
+        const Rc = rc.Rc(@This());
         const Weak = Rc.Weak;
 
         pub fn init(allocator: std.mem.Allocator) !Rc {
@@ -141,7 +141,7 @@ test "weak atomic" {
 
 test "cyclic atomic" {
     const Gadget = struct {
-        _me: Weak,
+        _me: rc.Arc(@This()).Weak,
 
         const Self = @This();
         const Rc = rc.Arc(Self);
