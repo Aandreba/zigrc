@@ -1,11 +1,20 @@
+set windows-powershell := true
+
 coverage: clean
     rm -rf kcov-out
     zig build test -Doptimize=Debug
     kcov --include-pattern=src/root.zig,src/tests.zig kcov-out .zig-cache/o/**/test
 
+[unix]
 docs:
     zig build
     xdg-open http://localhost:3000/
+    bun run docs/index.ts
+
+[windows]
+docs:
+    zig build
+    Start-Process http://localhost:3000/
     bun run docs/index.ts
 
 test:
