@@ -25,6 +25,26 @@ test "basic" {
     try expect(five.tryUnwrap() != null);
 }
 
+test "basic slice" {
+    var five = try rc.RcSlice(i32).init(alloc, 5);
+    five.items[0] = 1;
+    errdefer five.release();
+
+    try expect(five.strongCount() == 1);
+    var next_five = five.retain();
+    try expect(next_five.strongCount() == 2);
+    next_five.release();
+
+    try expect(five.strongCount() == 1);
+    const maybe_arr = five.tryUnwrap();
+    try expect(maybe_arr != null);
+    const arr = maybe_arr.?;
+    defer arr.deinit();
+    std.debug.print("{}\n", .{arr});
+    try expect(arr.items.len == 5);
+    try expect(arr.items[0] == 1);
+}
+
 test "weak" {
     var five = try rc.Rc(i32).init(alloc, 5);
     try expect(five.strongCount() == 1);
