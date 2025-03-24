@@ -529,6 +529,118 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
     };
 }
 
+/// A single threaded, strong reference to a reference-counted slice of values.
+/// This reference counter cannot generate weak references.
+pub fn RcUnmanagedSlice(comptime T: type) type {
+    return RcAlignedUnmanagedSlice(T, @alignOf(T));
+}
+
+/// A single threaded, strong reference to a reference-counted slice of values.
+/// This reference counter cannot generate weak references.
+pub fn RcAlignedUnmanagedSlice(comptime T: type, comptime alignment: u29) type {
+    return struct {
+        items: []align(internal_alignment) T,
+
+        const Self = @This();
+        /// The true alignment of the value stored on the heap. This value will never be lower than the provided 'alignment'.
+        pub const internal_alignment = @max(alignment, @alignOf(usize));
+
+        /// Creates a new reference-counted value.
+        pub fn init(alloc: Allocator, len: usize) !Self {
+            const inner = try create(alloc, len);
+            ptrToStrong(inner).* = 1;
+            return Self{ .items = inner };
+        }
+
+        /// Gets the number of strong references to this value.
+        pub fn strongCount(self: Self) usize {
+            return self.strong().*;
+        }
+
+        /// Increments the strong count.
+        pub fn retain(self: Self) Self {
+            self.strong().* += 1;
+            return self;
+        }
+
+        /// Decrements the reference count, deallocating if the count reaches zero.
+        /// The continued use of the pointer after calling `release` is undefined behaviour.
+        pub fn release(self: Self, allocator: Allocator) void {
+            self.strong().* -= 1;
+            if (self.strong().* == 0) {
+                destroy(allocator, self.items);
+            }
+        }
+
+        /// Decrements the reference count, returning the underlying 'ArrayList' if the count reaches zero.
+        /// The continued use of the pointer after calling this method is undefined behaviour.
+        pub fn releaseUnwrap(self: Self) ?std.ArrayListAlignedUnmanaged(T, internal_alignment) {
+            self.strong().* -= 1;
+            if (self.strong().* == 0) {
+                const items_size = std.math.mul(usize, @sizeOf(T), self.items.len) catch unreachable;
+                const counter_offset = std.mem.alignForward(usize, items_size, @alignOf(usize));
+                const total_size = std.math.add(usize, counter_offset, @sizeOf(usize)) catch unreachable;
+                // We add this padding so we're able to return this pointer as an ArrayList of T
+                const padded_size = std.mem.alignForward(usize, total_size, @sizeOf(T));
+                return std.ArrayListAlignedUnmanaged(T, internal_alignment){
+                    .items = self.items,
+                    .capacity = @divExact(padded_size, @sizeOf(T)),
+                };
+            }
+            return null;
+        }
+
+        /// Returns the inner value, if the `Rc` has exactly one strong reference.
+        /// Otherwise, `null` is returned.
+        /// The continued use of the pointer if the method successfully returns the 'ArrayList' is undefined behaviour.
+        pub fn tryUnwrap(self: Self) ?std.ArrayListAlignedUnmanaged(T, internal_alignment) {
+            if (self.strong().* == 1) {
+                self.strong().* = 0;
+                const items_size = std.math.mul(usize, @sizeOf(T), self.items.len) catch unreachable;
+                const counter_offset = std.mem.alignForward(usize, items_size, @alignOf(usize));
+                const total_size = std.math.add(usize, counter_offset, @sizeOf(usize)) catch unreachable;
+                // We add this padding so we're able to return this pointer as an ArrayList of T
+                const padded_size = std.mem.alignForward(usize, total_size, @sizeOf(T));
+                return std.ArrayListAlignedUnmanaged(T, internal_alignment){
+                    .items = self.items,
+                    .capacity = @divExact(padded_size, @sizeOf(T)),
+                };
+            }
+            return null;
+        }
+
+        inline fn strong(self: Self) *usize {
+            return ptrToStrong(self.items);
+        }
+
+        inline fn create(allocator: Allocator, len: usize) ![]align(internal_alignment) T {
+            const items_size = try std.math.mul(usize, @sizeOf(T), len);
+            const counter_offset = std.mem.alignForward(usize, items_size, @alignOf(usize));
+            const total_size = try std.math.add(usize, counter_offset, @sizeOf(usize));
+            // We add this padding so we're able to return this pointer as an ArrayList of T
+            const padded_size = std.mem.alignForward(usize, total_size, @sizeOf(T));
+            const bytes: []align(internal_alignment) u8 = try allocator.alignedAlloc(u8, internal_alignment, padded_size);
+            return @as([*]align(internal_alignment) T, @ptrCast(bytes.ptr))[0..len];
+        }
+
+        inline fn destroy(allocator: Allocator, ptr: []align(internal_alignment) T) void {
+            const items_size = std.math.mul(usize, @sizeOf(T), ptr.len) catch unreachable;
+            const counter_offset = std.mem.alignForward(usize, items_size, @alignOf(usize));
+            const total_size = std.math.add(usize, counter_offset, @sizeOf(usize)) catch unreachable;
+            // We add this padding so we're able to return this pointer as an ArrayList of T
+            const padded_size = std.mem.alignForward(usize, total_size, @sizeOf(T));
+            const bytes: []align(internal_alignment) u8 = @as([*]align(internal_alignment) u8, @ptrCast(ptr))[0..padded_size];
+            allocator.free(bytes);
+        }
+
+        inline fn ptrToStrong(ptr: []align(internal_alignment) T) *usize {
+            const items_size = std.math.mul(usize, @sizeOf(T), ptr.len) catch unreachable;
+            const counter_offset = std.mem.alignForward(usize, items_size, @alignOf(usize));
+            return @ptrCast(@alignCast(&@as([*]align(internal_alignment) u8, @ptrCast(ptr))[counter_offset]));
+        }
+    };
+}
+
 /// A multi-threaded, strong reference to a reference-counted value.
 pub fn ArcUnmanaged(comptime T: type) type {
     return ArcAlignedUnmanaged(T, @alignOf(T));
