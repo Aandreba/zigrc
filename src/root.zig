@@ -426,7 +426,7 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
         }
 
         inline fn create(allocator: Allocator) std.mem.Allocator.Error!*align(internal_alignment) T {
-            const bytes: []align(internal_alignment) u8 = try allocator.alignedAlloc(u8, internal_alignment, total_size);
+            const bytes: []align(internal_alignment) u8 = try allocator.alignedAlloc(u8, comptime std.mem.Alignment.fromByteUnits(internal_alignment), total_size);
             return @ptrCast(bytes.ptr);
         }
 
@@ -744,7 +744,7 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
         };
 
         inline fn create(allocator: Allocator) std.mem.Allocator.Error!*align(internal_alignment) T {
-            const bytes: []align(internal_alignment) u8 = try allocator.alignedAlloc(u8, internal_alignment, total_size);
+            const bytes: []align(internal_alignment) u8 = try allocator.alignedAlloc(u8, comptime std.mem.Alignment.fromByteUnits(internal_alignment), total_size);
             return @ptrCast(bytes.ptr);
         }
 
