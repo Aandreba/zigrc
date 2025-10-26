@@ -15,8 +15,10 @@ pub fn build(b: *Builder) void {
         build_v10(b);
     } else if (comptime builtin.zig_version.minor <= 11) {
         build_v11(b);
-    } else {
+    } else if (comptime builtin.zig_version.minor < 15) {
         build_v12(b);
+    } else {
+        build_v15(b);
     }
 }
 
@@ -167,6 +169,65 @@ fn build_v12(b: *std.Build) void {
     // Examples
     const example = b.addTest(.{
         .root_source_file = b.path("src/example.zig"),
+    });
+    const run_example = b.addRunArtifact(example);
+    const example_step = b.step("example", "Run library example");
+    example_step.dependOn(&run_example.step);
+}
+
+fn build_v15(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+    const coverage = b.option(bool, "coverage", "Generate test coverage") orelse false;
+
+    // Docs
+    const docs = b.addObject(.{
+        .name = "zigrc",
+        .root_module = b.addModule("zigrc", .{
+            .root_source_file = b.path("src/root.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    const docsget = b.addInstallDirectory(.{
+        .source_dir = docs.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    });
+
+    b.default_step.dependOn(&docsget.step);
+    // b.installArtifact(docs);
+
+    // Tests
+    const main_tests = b.addTest(.{
+        .root_module = b.addModule("zigrc-tests", .{
+            .root_source_file = b.path("src/tests.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_main_tests = b.addRunArtifact(main_tests);
+
+    if (coverage) {
+        main_tests.setExecCmd(&[_]?[]const u8{
+            "kcov",
+            "--include-pattern=src/root.zig,src/tests.zig",
+            "kcov-out",
+            null, // to get zig to use the --test-cmd-bin flag
+        });
+    }
+
+    const test_step = b.step("test", "Run library tests");
+    test_step.dependOn(&run_main_tests.step);
+
+    // Examples
+    const example = b.addTest(.{
+        .root_module = b.addModule("zigrc-example", .{
+            .root_source_file = b.path("src/example.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
     const run_example = b.addRunArtifact(example);
     const example_step = b.step("example", "Run library example");

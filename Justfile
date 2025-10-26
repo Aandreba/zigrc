@@ -5,7 +5,8 @@ coverage: clean
 
 docs:
     zig build
-    xdg-open http://localhost:3000/
+    # xdg-open http://localhost:3000/
+    open http://localhost:3000/
     bun run docs/index.ts
 
 test:
