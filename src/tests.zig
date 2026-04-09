@@ -170,3 +170,76 @@ test "cyclic atomic" {
     try expect(gadget.strongCount() == 1);
     try expect(gadget.weakCount() == 1);
 }
+
+// SECURE VARIANTS
+//
+// These tests verify that `SecureRc` / `SecureArc` zero the entire backing
+// allocation on final release.  We back them with a `FixedBufferAllocator`
+// whose `free` is a no-op, so any memory that the destructor touched remains
+// inspectable after release.  A distinctive marker value is planted in the
+// payload and we assert that no byte pattern matching the marker survives
+// anywhere in the backing buffer.
+
+test "SecureRc zeroes backing allocation on release" {
+    var buffer: [4096]u8 align(64) = undefined;
+    @memset(&buffer, 0xAA);
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    const a = fba.allocator();
+
+    const marker: u64 = 0xDEADBEEFCAFEBABE;
+    var secret = try rc.SecureRc(u64).init(a, marker);
+    try expect(secret.value.* == marker);
+    try expect(secret.strongCount() == 1);
+    secret.release();
+
+    // No byte sequence matching the marker should remain in the buffer.
+    const marker_bytes = std.mem.asBytes(&marker);
+    try expect(std.mem.indexOf(u8, &buffer, marker_bytes) == null);
+}
+
+test "SecureArc zeroes backing allocation on release" {
+    var buffer: [4096]u8 align(64) = undefined;
+    @memset(&buffer, 0xAA);
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    const a = fba.allocator();
+
+    const marker: u64 = 0xFEEDFACECAFEBEEF;
+    var secret = try rc.SecureArc(u64).init(a, marker);
+    try expect(secret.value.* == marker);
+    try expect(secret.strongCount() == 1);
+    secret.release();
+
+    const marker_bytes = std.mem.asBytes(&marker);
+    try expect(std.mem.indexOf(u8, &buffer, marker_bytes) == null);
+}
+
+test "SecureRc zeroes backing when dropped via releaseUnwrap last strong" {
+    var buffer: [4096]u8 align(64) = undefined;
+    @memset(&buffer, 0xAA);
+    var fba = std.heap.FixedBufferAllocator.init(&buffer);
+    const a = fba.allocator();
+
+    const marker: u64 = 0xBADF00D1BADF00D2;
+    var secret = try rc.SecureRc(u64).init(a, marker);
+    const got = secret.releaseUnwrap();
+    try expect(got != null);
+    try expect(got.? == marker);
+
+    // The copied-out value is on the stack; the heap backing must have been
+    // zeroed by destroy().  We can still see what was previously at the
+    // allocation site (FBA free is a no-op), so the marker should be gone.
+    const marker_bytes = std.mem.asBytes(&marker);
+    try expect(std.mem.indexOf(u8, &buffer, marker_bytes) == null);
+}
+
+test "SecureArc type aliases RcAligned under single_threaded" {
+    // A compile-time sanity check: SecureArc and SecureRc both accept
+    // zero_on_destroy = true and expose the same surface.  In single-threaded
+    // builds ArcAligned collapses to RcAligned, which must also thread the
+    // zero_on_destroy flag through.  This test just exercises the type path.
+    const T = rc.SecureArc(u32);
+    var v = try T.init(alloc, 42);
+    defer v.release();
+    try expect(v.value.* == 42);
+    try expect(v.strongCount() == 1);
+}

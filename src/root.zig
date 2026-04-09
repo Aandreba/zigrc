@@ -4,17 +4,23 @@ const Allocator = std.mem.Allocator;
 
 /// A single threaded, strong reference to a reference-counted value.
 pub fn Rc(comptime T: type) type {
-    return RcAligned(T, @alignOf(T));
+    return RcAligned(T, @alignOf(T), false);
+}
+
+/// A single threaded, strong reference to a reference-counted value that
+/// security-zeroes its backing allocation when the last reference is dropped.
+pub fn SecureRc(comptime T: type) type {
+    return RcAligned(T, @alignOf(T), true);
 }
 
 /// A single threaded, strong reference to a reference-counted value.
-pub fn RcAligned(comptime T: type, comptime alignment: u29) type {
+pub fn RcAligned(comptime T: type, comptime alignment: u29, comptime zero_on_destroy: bool) type {
     return struct {
         value: *align(internal_alignment) T,
         alloc: Allocator,
 
         const Self = @This();
-        const Unmanaged = RcAlignedUnmanaged(T, alignment);
+        const Unmanaged = RcAlignedUnmanaged(T, alignment, zero_on_destroy);
         pub const internal_alignment = Unmanaged.internal_alignment;
         pub const total_size = Unmanaged.total_size;
 
@@ -102,7 +108,7 @@ pub fn RcAligned(comptime T: type, comptime alignment: u29) type {
             const WeakUnmanaged = Unmanaged.Weak;
 
             /// Creates a new weak reference.
-            pub fn init(parent: RcAligned(T, alignment)) Weak {
+            pub fn init(parent: RcAligned(T, alignment, zero_on_destroy)) Weak {
                 return Weak{
                     .inner = WeakUnmanaged.init(parent.asUnmanaged()),
                     .alloc = parent.alloc,
@@ -134,8 +140,8 @@ pub fn RcAligned(comptime T: type, comptime alignment: u29) type {
             /// Attempts to upgrade the weak pointer to an `Rc`, delaying dropping of the inner value if successful.
             ///
             /// Returns `null` if the inner value has since been dropped.
-            pub fn upgrade(self: *Weak) ?RcAligned(T, alignment) {
-                if (self.inner.upgrade(self.alloc)) |ptr| return RcAligned(T, alignment){
+            pub fn upgrade(self: *Weak) ?RcAligned(T, alignment, zero_on_destroy) {
+                if (self.inner.upgrade(self.alloc)) |ptr| return RcAligned(T, alignment, zero_on_destroy){
                     .value = ptr.value,
                     .alloc = self.alloc,
                 };
@@ -153,18 +159,24 @@ pub fn RcAligned(comptime T: type, comptime alignment: u29) type {
 
 /// A multi-threaded, strong reference to a reference-counted value.
 pub fn Arc(comptime T: type) type {
-    return ArcAligned(T, @alignOf(T));
+    return ArcAligned(T, @alignOf(T), false);
+}
+
+/// A multi-threaded, strong reference to a reference-counted value that
+/// security-zeroes its backing allocation when the last reference is dropped.
+pub fn SecureArc(comptime T: type) type {
+    return ArcAligned(T, @alignOf(T), true);
 }
 
 /// A multi-threaded, strong reference to a reference-counted value.
-pub fn ArcAligned(comptime T: type, comptime alignment: u29) type {
-    if (builtin.single_threaded) return RcAligned(T, alignment);
+pub fn ArcAligned(comptime T: type, comptime alignment: u29, comptime zero_on_destroy: bool) type {
+    if (builtin.single_threaded) return RcAligned(T, alignment, zero_on_destroy);
     return struct {
         value: *align(internal_alignment) T,
         alloc: Allocator,
 
         const Self = @This();
-        const Unmanaged = ArcAlignedUnmanaged(T, alignment);
+        const Unmanaged = ArcAlignedUnmanaged(T, alignment, zero_on_destroy);
         pub const internal_alignment = Unmanaged.internal_alignment;
         pub const total_size = Unmanaged.total_size;
 
@@ -254,7 +266,7 @@ pub fn ArcAligned(comptime T: type, comptime alignment: u29) type {
             const UnmanagedWeak = Unmanaged.Weak;
 
             /// Creates a new weak reference.
-            pub fn init(parent: ArcAligned(T, alignment)) Weak {
+            pub fn init(parent: ArcAligned(T, alignment, zero_on_destroy)) Weak {
                 return Weak{
                     .inner = UnmanagedWeak.init(parent.asUnmanaged()),
                     .alloc = parent.alloc,
@@ -286,9 +298,9 @@ pub fn ArcAligned(comptime T: type, comptime alignment: u29) type {
             /// Attempts to upgrade the weak pointer to an `Arc`, delaying dropping of the inner value if successful.
             ///
             /// Returns `null` if the inner value has since been dropped.
-            pub fn upgrade(self: *Weak) ?ArcAligned(T, alignment) {
+            pub fn upgrade(self: *Weak) ?ArcAligned(T, alignment, zero_on_destroy) {
                 if (self.inner.upgrade(self.alloc)) |strong_ref| {
-                    return ArcAligned(T, alignment){ .value = strong_ref.value, .alloc = self.alloc };
+                    return ArcAligned(T, alignment, zero_on_destroy){ .value = strong_ref.value, .alloc = self.alloc };
                 }
                 return null;
             }
@@ -304,11 +316,11 @@ pub fn ArcAligned(comptime T: type, comptime alignment: u29) type {
 
 /// A single threaded, strong reference to a reference-counted value.
 pub fn RcUnmanaged(comptime T: type) type {
-    return RcAlignedUnmanaged(T, @alignOf(T));
+    return RcAlignedUnmanaged(T, @alignOf(T), false);
 }
 
 /// A single threaded, strong reference to a reference-counted value.
-pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
+pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: u29, comptime zero_on_destroy: bool) type {
     return struct {
         value: *align(internal_alignment) T,
 
@@ -319,6 +331,14 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
         const counter_offset = std.mem.alignForward(usize, @sizeOf(T), @alignOf(usize));
         /// Since we'll never put this value into an array, there is no need to add alignment padding at the end.
         pub const total_size = counter_offset + 2 * @sizeOf(usize);
+
+        comptime {
+            // The counter block must sit past the value and respect usize
+            // alignment so strong/weak loads cannot tear.
+            std.debug.assert(counter_offset >= @sizeOf(T));
+            std.debug.assert(counter_offset % @alignOf(usize) == 0);
+            std.debug.assert(total_size >= counter_offset + 2 * @sizeOf(usize));
+        }
 
         /// Creates a new reference-counted value.
         pub fn init(alloc: Allocator, t: T) Allocator.Error!Self {
@@ -432,6 +452,7 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
 
         inline fn destroy(allocator: Allocator, ptr: *align(internal_alignment) T) void {
             const bytes: []align(internal_alignment) u8 = @as([*]align(internal_alignment) u8, @ptrCast(ptr))[0..total_size];
+            if (zero_on_destroy) @memset(bytes, 0);
             allocator.free(bytes);
         }
 
@@ -448,7 +469,7 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
             inner: ?*align(internal_alignment) anyopaque = null,
 
             /// Creates a new weak reference.
-            pub fn init(parent: RcAlignedUnmanaged(T, alignment)) Weak {
+            pub fn init(parent: RcAlignedUnmanaged(T, alignment, zero_on_destroy)) Weak {
                 parent.weak().* += 1;
                 return Weak{ .inner = @ptrCast(parent.value) };
             }
@@ -485,7 +506,7 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
             /// Attempts to upgrade the weak pointer to an `Rc`, delaying dropping of the inner value if successful.
             ///
             /// Returns `null` if the inner value has since been dropped.
-            pub fn upgrade(self: *Weak, allocator: Allocator) ?RcAlignedUnmanaged(T, alignment) {
+            pub fn upgrade(self: *Weak, allocator: Allocator) ?RcAlignedUnmanaged(T, alignment, zero_on_destroy) {
                 const ptr = self.value() orelse return null;
 
                 if (ptrToStrong(ptr).* == 0) {
@@ -498,7 +519,7 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
                 }
 
                 ptrToStrong(ptr).* += 1;
-                return RcAlignedUnmanaged(T, alignment){
+                return RcAlignedUnmanaged(T, alignment, zero_on_destroy){
                     .value = ptr,
                 };
             }
@@ -531,12 +552,12 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
 
 /// A multi-threaded, strong reference to a reference-counted value.
 pub fn ArcUnmanaged(comptime T: type) type {
-    return ArcAlignedUnmanaged(T, @alignOf(T));
+    return ArcAlignedUnmanaged(T, @alignOf(T), false);
 }
 
 /// A multi-threaded, strong reference to a reference-counted value.
-pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
-    if (builtin.single_threaded) return RcAlignedUnmanaged(T, alignment);
+pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: u29, comptime zero_on_destroy: bool) type {
+    if (builtin.single_threaded) return RcAlignedUnmanaged(T, alignment, zero_on_destroy);
     return struct {
         value: *align(internal_alignment) T,
 
@@ -550,6 +571,16 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
         /// If the alignment of 'T' is higher than 'std.atomic.cache_line', the manually added padding will be smaller than the one
         /// added by a regular Zig struct.
         pub const total_size = std.mem.alignForward(usize, counter_offset + 2 * @sizeOf(usize), std.atomic.cache_line);
+
+        comptime {
+            // The counter block must sit past the value, respect usize
+            // alignment, and live on its own cache line so neither counter
+            // nor T suffers false sharing.
+            std.debug.assert(counter_offset >= @sizeOf(T));
+            std.debug.assert(counter_offset % @alignOf(usize) == 0);
+            std.debug.assert(counter_offset % std.atomic.cache_line == 0);
+            std.debug.assert(total_size >= counter_offset + 2 * @sizeOf(usize));
+        }
 
         /// Creates a new reference-counted value.
         pub fn init(alloc: Allocator, t: T) Allocator.Error!Self {
@@ -595,8 +626,13 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
         }
 
         /// Increments the strong count.
+        ///
+        /// Uses `.monotonic` ordering: no payload ordering is established at
+        /// retain time, and the acquire fence on the final drop synchronises
+        /// with every prior release.  Any stronger ordering here would be a
+        /// correctness-irrelevant cost.
         pub fn retain(self: Self) Self {
-            _ = @atomicRmw(usize, self.strong(), .Add, 1, .acq_rel);
+            _ = @atomicRmw(usize, self.strong(), .Add, 1, .monotonic);
             return self;
         }
 
@@ -657,7 +693,7 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
             inner: ?*align(internal_alignment) anyopaque = null,
 
             /// Creates a new weak reference.
-            pub fn init(parent: ArcAlignedUnmanaged(T, alignment)) Weak {
+            pub fn init(parent: ArcAlignedUnmanaged(T, alignment, zero_on_destroy)) Weak {
                 _ = @atomicRmw(usize, parent.weak(), .Add, 1, .acq_rel);
                 return Weak{ .inner = @ptrCast(parent.value) };
             }
@@ -686,9 +722,12 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
             }
 
             /// Increments the weak count.
+            ///
+            /// Uses `.monotonic` ordering: see the comment on
+            /// `ArcAlignedUnmanaged.retain` for the reasoning.
             pub fn retain(self: Weak) Weak {
                 if (self.weak()) |ptr| {
-                    _ = @atomicRmw(usize, ptr, .Add, 1, .acq_rel);
+                    _ = @atomicRmw(usize, ptr, .Add, 1, .monotonic);
                 }
                 return self;
             }
@@ -696,7 +735,7 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
             /// Attempts to upgrade the weak pointer to an `Arc`, delaying dropping of the inner value if successful.
             ///
             /// Returns `null` if the inner value has since been dropped.
-            pub fn upgrade(self: *Weak, allocator: Allocator) ?ArcAlignedUnmanaged(T, alignment) {
+            pub fn upgrade(self: *Weak, allocator: Allocator) ?ArcAlignedUnmanaged(T, alignment, zero_on_destroy) {
                 const ptr = self.value() orelse return null;
 
                 while (true) {
@@ -710,7 +749,7 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
                     }
 
                     if (@cmpxchgStrong(usize, ptrToStrong(ptr), prev, prev + 1, .acquire, .monotonic) == null) {
-                        return ArcAlignedUnmanaged(T, alignment){ .value = ptr };
+                        return ArcAlignedUnmanaged(T, alignment, zero_on_destroy){ .value = ptr };
                     }
 
                     std.atomic.spinLoopHint();
@@ -750,6 +789,7 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
 
         inline fn destroy(allocator: Allocator, ptr: *align(internal_alignment) T) void {
             const bytes: []align(internal_alignment) u8 = @as([*]align(internal_alignment) u8, @ptrCast(ptr))[0..total_size];
+            if (zero_on_destroy) @memset(bytes, 0);
             allocator.free(bytes);
         }
 
