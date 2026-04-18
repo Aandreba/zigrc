@@ -320,6 +320,14 @@ pub fn RcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
         /// Since we'll never put this value into an array, there is no need to add alignment padding at the end.
         pub const total_size = counter_offset + 2 * @sizeOf(usize);
 
+        comptime {
+            // The counter block must sit past the value and respect usize
+            // alignment so strong/weak loads cannot tear.
+            std.debug.assert(counter_offset >= @sizeOf(T));
+            std.debug.assert(counter_offset % @alignOf(usize) == 0);
+            std.debug.assert(total_size >= counter_offset + 2 * @sizeOf(usize));
+        }
+
         /// Creates a new reference-counted value.
         pub fn init(alloc: Allocator, t: T) Allocator.Error!Self {
             const inner = try create(alloc);
@@ -551,6 +559,16 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
         /// added by a regular Zig struct.
         pub const total_size = std.mem.alignForward(usize, counter_offset + 2 * @sizeOf(usize), std.atomic.cache_line);
 
+        comptime {
+            // The counter block must sit past the value, respect usize
+            // alignment, and live on its own cache line so neither counter
+            // nor T suffers false sharing.
+            std.debug.assert(counter_offset >= @sizeOf(T));
+            std.debug.assert(counter_offset % @alignOf(usize) == 0);
+            std.debug.assert(counter_offset % std.atomic.cache_line == 0);
+            std.debug.assert(total_size >= counter_offset + 2 * @sizeOf(usize));
+        }
+
         /// Creates a new reference-counted value.
         pub fn init(alloc: Allocator, t: T) Allocator.Error!Self {
             const inner = try create(alloc);
@@ -595,8 +613,13 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
         }
 
         /// Increments the strong count.
+        ///
+        /// Uses `.monotonic` ordering: no payload ordering is established at
+        /// retain time, and the acquire fence on the final drop synchronises
+        /// with every prior release.  Any stronger ordering here would be a
+        /// correctness-irrelevant cost.
         pub fn retain(self: Self) Self {
-            _ = @atomicRmw(usize, self.strong(), .Add, 1, .acq_rel);
+            _ = @atomicRmw(usize, self.strong(), .Add, 1, .monotonic);
             return self;
         }
 
@@ -686,9 +709,12 @@ pub fn ArcAlignedUnmanaged(comptime T: type, comptime alignment: u29) type {
             }
 
             /// Increments the weak count.
+            ///
+            /// Uses `.monotonic` ordering: see the comment on
+            /// `ArcAlignedUnmanaged.retain` for the reasoning.
             pub fn retain(self: Weak) Weak {
                 if (self.weak()) |ptr| {
-                    _ = @atomicRmw(usize, ptr, .Add, 1, .acq_rel);
+                    _ = @atomicRmw(usize, ptr, .Add, 1, .monotonic);
                 }
                 return self;
             }
